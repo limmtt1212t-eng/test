@@ -1,0 +1,48 @@
+auto_lover
+alcohol
+shopping
+
+Финальные целочисленные веса (canonical, из config.py):
+
+'auto_lover': {
+    'TAG_10615': 10,
+    'TAG_20158': 6,
+    'TAG_22019': 5,
+    'TAG_20178': 5,
+    'TAG_22560': 4,
+    'TAG_10612': 3,
+    'TAG_10616': 3,
+    'TAG_11517': 2,
+}
+
+'alcohol': {
+    'TAG_20460': 10,
+    'TAG_11001': 4,
+    'TAG_10208': 2,
+    'TAG_20452': 1,
+    'TAG_24064': 1,
+}
+
+'shopping': {
+    'TAG_12952': 10,
+    'TAG_22019': 9,
+    'TAG_20178': 9,
+    'TAG_20158': 8,
+    'TAG_20937': 8,
+    'TAG_21998': 7,
+    'TAG_12610': 6,
+    'TAG_21144': 5,
+    'TAG_27180': 5,
+    'TAG_20144': 5,
+    'TAG_20474': 4,
+    'TAG_21162': 3,
+    'TAG_15928': 3,
+    'TAG_21177': 2,
+    'TAG_12608': 2,
+    'TAG_13509': 1,
+}
+
+Подходы по группам:
+- auto_lover: IntegerMonotonicLinearGrouper (clustering_monotonic_auto_lover_v3.ipynb)
+- shopping: IntegerMonotonicLinearGrouper (clustering_monotonic_shopping_features_v3.ipynb)
+- alcohol: AggregatedHashtagsProcessor (clustering_0103.ipynb)
