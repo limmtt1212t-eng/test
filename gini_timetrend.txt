@@ -1,0 +1,154 @@
+﻿import numpy as np
+import pandas as pd
+from sklearn.metrics import roc_auc_score
+from scipy.stats import norm
+import matplotlib.pyplot as plt
+import warnings
+
+warnings.filterwarnings("ignore")
+
+
+def gini_binary(y_true, y_pred):
+    """Считает Gini через AUC"""
+    auc = roc_auc_score(y_true, y_pred)
+    return 2 * auc - 1
+
+
+def compute_confidence_interval(gini, n, alpha=0.05):
+    """Простой нормальный аппрокс. ДИ"""
+    se = np.sqrt((gini * (1 - gini)) / n) if n > 0 else 0
+    z = norm.ppf(1 - alpha / 2)
+    return gini - z * se, gini + z * se
+
+
+def plot_gini_dynamics_binary(df1, observed_col, predicted_col, date_col,
+                              freq='M', min_observations=100,
+                              alpha_95=0.05, alpha_99=0.01,
+                              figsize=(14, 8), title=None):
+    """
+    Динамика Gini (бинарная классификация) с доверительными интервалами
+    """
+
+    freq = str(freq).upper()
+
+    data = df1.copy()
+    data[date_col] = pd.to_datetime(data[date_col])
+
+    freq_map = {
+        'D': 'D',
+        'W': 'W',
+        'M': 'M',
+        'Q': 'Q',
+        'Y': 'Y'
+    }
+
+    period_freq = freq_map.get(freq, 'M')
+    grouped = data.groupby(data[date_col].dt.to_period(period_freq), sort=True)
+    
+    results = []
+
+    for period, group_data in grouped:
+        if len(group_data) >= min_observations:
+            try:
+                gini_model = gini_binary(group_data[observed_col], group_data[predicted_col])
+                n_obs = len(group_data)
+
+                ci_95_low, ci_95_high = compute_confidence_interval(gini_model, n_obs, alpha_95)
+                ci_99_low, ci_99_high = compute_confidence_interval(gini_model, n_obs, alpha_99)
+
+                results.append({
+                    "period": period,
+                    "gini": gini_model,
+                    "n_observations": n_obs,
+                    "ci_95_low": ci_95_low,
+                    "ci_95_high": ci_95_high,
+                    "ci_99_low": ci_99_low,
+                    "ci_99_high": ci_99_high,
+                })
+            except Exception as e:
+                print(f"Ошибка в периоде {period}: {e}")
+                continue
+
+    if not results:
+        print("Нет данных для графика")
+        return None, None
+
+    results_df1 = pd.DataFrame(results).sort_values('period')
+    x_positions = np.arange(len(results_df1))
+
+    fig, ax1 = plt.subplots(figsize=figsize)
+    ax2 = ax1.twinx()
+
+    # Столбцы = число наблюдений
+    ax2.bar(x_positions, results_df1['n_observations'],
+            alpha=0.3, color="#2ca02c", label="Количество наблюдений", width=0.6)
+
+    # 99% ДИ
+    ax1.fill_between(x_positions, results_df1['ci_99_low'], results_df1['ci_99_high'],
+                     alpha=0.3, color="#ff4444", label="99% ДИ")
+
+    # 95% ДИ
+    ax1.fill_between(x_positions, results_df1['ci_95_low'], results_df1['ci_95_high'],
+                     alpha=0.5, color="#ffcc00", label="95% ДИ")
+
+    # Линия Gini
+    ax1.plot(x_positions, results_df1['gini'], color='black',
+             linewidth=2, marker='o', markersize=6, label="Gini")
+
+    # подписи на точках
+    for x_pos, (_, row) in zip(x_positions, results_df1.iterrows()):
+        ax1.annotate(f"{row['gini']:.3f}",
+                     (x_pos, row['gini']),
+                     textcoords="offset points", xytext=(0, 10),
+                     ha='center', fontsize=9, fontweight='bold')
+
+    # Пороговые линии
+    ax1.axhline(y=gini_binary(data[observed_col], data[predicted_col]), color='purple', linestyle='--', alpha=0.7, label='Среднее Gini')
+    ax1.axhline(y=0.2, color='red', linestyle='--', alpha=0.7, label='Порог 20%')
+    ax1.axhline(y=0.3, color='green', linestyle='--', alpha=0.7, label='Порог 30%')
+
+    # Оси
+    ax1.set_xlabel("Период", fontsize=12, fontweight='bold')
+    ax1.set_ylabel("Gini", fontsize=12, fontweight='bold', color="#1f77b4")
+    ax2.set_ylabel("Количество наблюдений", fontsize=12, fontweight='bold', color="#2ca02c")
+
+    ax1.tick_params(axis='y', labelcolor="#1f77b4")
+    ax2.tick_params(axis='y', labelcolor="#2ca02c")
+
+    # Формат периодов без визуального сдвига к следующему месяцу/кварталу
+    def _format_period(period):
+        if freq == 'Q':
+            return f"{period.year}-Q{period.quarter}"
+        if freq == 'Y':
+            return f"{period.year}"
+        if freq == 'M':
+            return period.start_time.strftime('%Y-%m')
+        if freq == 'W':
+            return f"{period.start_time:%Y-%m-%d}\n{period.end_time:%Y-%m-%d}"
+        return period.start_time.strftime('%Y-%m-%d')
+
+    ax1.set_xticks(x_positions)
+    ax1.set_xticklabels([_format_period(period) for period in results_df1['period']])
+    ax1.set_xlim(-0.5, len(results_df1) - 0.5)
+
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+    if title is None:
+        title = "Динамика Gini (бинарная классификация)"
+    ax1.set_title(title, fontsize=14, fontweight='bold', pad=20)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2,
+               loc='upper left', frameon=True, fancybox=True, shadow=True)
+
+    ax1.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    print(f"Построен график для {len(results_df1)} периодов")
+    print(f"Gini: {gini_binary(data[observed_col], data[predicted_col]):.3f}")
+    print(f"Мин Gini: {results_df1['gini'].min():.3f}")
+    print(f"Макс Gini: {results_df1['gini'].max():.3f}")
+    print(f"Среднее кол-во наблюдений: {results_df1['n_observations'].mean():.0f}")
+
+    return fig, ax1
