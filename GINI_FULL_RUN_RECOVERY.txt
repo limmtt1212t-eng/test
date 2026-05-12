@@ -1,0 +1,223 @@
+Инструкция: попробовать Gini на полном датасете без перезапуска kernel
+====================================================================
+
+Контекст
+-------
+
+Если ноутбук уже отработал несколько часов и упал на Gini-тесте с MemoryError,
+не перезапускайте kernel. Сначала выполните cleanup-ячейку, затем запускайте
+Gini-тесты по одному.
+
+Важно:
+- M 2.1 Overall Gini и M 2.3 Gini Dynamics можно пробовать на полном датасете.
+- M 2.2 PowerStat by Factors на полном датасете рискованный, но можно попробовать
+  с n_jobs=1.
+- M 2.4 PowerStat Uplift на полном датасете лучше не запускать: он самый тяжелый.
+
+
+Ячейка 1. Очистка памяти
+------------------------
+
+```python
+import gc
+import os
+
+try:
+    import psutil
+    process = psutil.Process(os.getpid())
+    print(f"RAM before cleanup: {process.memory_info().rss / 1024**3:.2f} GB")
+except Exception:
+    process = None
+
+try:
+    import matplotlib.pyplot as plt
+    plt.close("all")
+except Exception:
+    pass
+
+# Удаляем лишнее, если оно осталось после предыдущих попыток.
+# НЕ удаляем: final_df, validated_config, TEST_FACTORIES, TEST_GROUPS,
+# inline_tests, inline_results.
+for name in [
+    "data",
+    "gini_factor_df",
+    "gini_uplift_df",
+    "weighted_score",
+    "weighted_expected",
+    "schema_summary",
+    "split_summary",
+    "date_summary",
+    "feature_missing",
+]:
+    if name in globals():
+        del globals()[name]
+
+gc.collect()
+
+try:
+    print(f"final_df memory: {final_df.memory_usage(deep=True).sum() / 1024**3:.2f} GB")
+    if process is not None:
+        print(f"RAM after cleanup: {process.memory_info().rss / 1024**3:.2f} GB")
+except Exception:
+    pass
+```
+
+
+Ячейка 2. M 2.1 Overall Gini на полном датасете
+------------------------------------------------
+
+Этот тест не требует всех факторных колонок. Берем только sample, target, score
+и exposure, чтобы не держать лишние ссылки.
+
+```python
+import gc
+from sbs_evaluation_tool.tests.m2_gini_tests import M21_GiniTest
+
+m21_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    SCORE_COLUMN,
+    WEIGHT_COLUMN,
+]))
+
+m21_df = final_df[m21_cols]
+
+test = M21_GiniTest()
+result = test.run(df=m21_df, config=validated_config)
+
+inline_tests["M 2.1"] = test
+inline_results["M 2.1"] = result
+
+print(f"M 2.1 signal: {test.test_signal}")
+_display_test_result(result)
+
+del m21_df, test, result
+gc.collect()
+```
+
+
+Ячейка 3. M 2.3 Gini Dynamics на полном датасете
+-------------------------------------------------
+
+Этот тест тоже можно запускать на тонком датафрейме.
+
+```python
+import gc
+from sbs_evaluation_tool.tests.m2_gini_tests import M23_GiniDynamicsTest
+
+m23_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    DATE_COLUMN,
+    TARGET_COLUMN,
+    SCORE_COLUMN,
+    WEIGHT_COLUMN,
+]))
+
+m23_df = final_df[m23_cols]
+
+test = M23_GiniDynamicsTest()
+result = test.run(df=m23_df, config=validated_config)
+
+inline_tests["M 2.3"] = test
+inline_results["M 2.3"] = result
+
+print(f"M 2.3 signal: {test.test_signal}")
+_display_test_result(result)
+
+del m23_df, test, result
+gc.collect()
+```
+
+
+Ячейка 4. M 2.2 PowerStat by Factors на полном датасете
+--------------------------------------------------------
+
+Осторожно: это тяжелый тест. Он считает PowerStat по всем numeric/categorical
+факторам. Если снова будет MemoryError, надо запускать его на сэмпле.
+
+```python
+import gc
+from sbs_evaluation_tool.tests.m2_gini_tests import M22_GiniFactorsTest
+
+m22_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+
+m22_df = final_df[m22_cols]
+
+test = M22_GiniFactorsTest()
+result = test.run(df=m22_df, config=validated_config, n_jobs=1)
+
+inline_tests["M 2.2"] = test
+inline_results["M 2.2"] = result
+
+print(f"M 2.2 signal: {test.test_signal}")
+_display_test_result(result)
+
+del m22_df, test, result
+gc.collect()
+```
+
+
+Если M 2.2 снова падает по памяти
+---------------------------------
+
+Запустите M 2.2 на сэмпле:
+
+```python
+import gc
+from sbs_evaluation_tool.tests.m2_gini_tests import M22_GiniFactorsTest
+
+M22_SAMPLE_ROWS = 500_000
+
+m22_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+
+m22_df = final_df[m22_cols].sample(
+    n=min(len(final_df), M22_SAMPLE_ROWS),
+    random_state=42,
+).copy()
+
+test = M22_GiniFactorsTest()
+result = test.run(df=m22_df, config=validated_config, n_jobs=1)
+
+inline_tests["M 2.2"] = test
+inline_results["M 2.2"] = result
+
+print(f"M 2.2 signal: {test.test_signal}")
+_display_test_result(result)
+
+del m22_df, test, result
+gc.collect()
+```
+
+
+Что не удалять
+--------------
+
+Не удаляйте эти объекты, если хотите продолжить без перезапуска:
+
+```python
+final_df
+validated_config
+TEST_FACTORIES
+TEST_GROUPS
+inline_tests
+inline_results
+numeric_features
+categorical_features
+DATE_COLUMN
+TARGET_COLUMN
+SCORE_COLUMN
+WEIGHT_COLUMN
+SAMPLE_COLUMN
+ID_COLUMN
+```
+
