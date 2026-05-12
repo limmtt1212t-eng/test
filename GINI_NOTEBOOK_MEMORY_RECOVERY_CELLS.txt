@@ -1,0 +1,219 @@
+Recovery для уже запущенного omtpl_retail_classical_freq_gini_validation.ipynb
+============================================================================
+
+Ситуация
+--------
+
+Ноутбук уже отработал долго, kernel живой, но упал на ячейке запуска M2/Gini
+из-за MemoryError. Перезапускать весь ноутбук не надо.
+
+Вставьте ячейки ниже прямо в текущий ноутбук после падения и выполните по
+порядку.
+
+Важно:
+- НЕ удаляйте final_df, validated_config, numeric_features, categorical_features
+  и переменные с именами колонок.
+- M 2.1 и M 2.3 запускаются на полном датасете, но на "тонких" датафреймах.
+- M 2.2 запускается на полном датасете с n_jobs=1.
+- M 2.4 по умолчанию запускается на сэмпле 200_000 строк, потому что это самый
+  тяжелый тест.
+
+
+Ячейка 1. Очистить память
+-------------------------
+
+```python
+import gc
+import os
+
+try:
+    import psutil
+    process = psutil.Process(os.getpid())
+    print(f"RAM before cleanup: {process.memory_info().rss / 1024**3:.2f} GB")
+except Exception:
+    process = None
+
+try:
+    import matplotlib.pyplot as plt
+    plt.close("all")
+except Exception:
+    pass
+
+# Удаляем тяжелые/временные объекты, которые уже не нужны для запуска M2.
+# НЕ удаляем: final_df, validated_config, numeric_features, categorical_features
+# и имена колонок.
+for name in [
+    "data",
+    "weighted_expected",
+    "weighted_score",
+    "feature_inventory",
+    "schema_audit",
+    "split_summary",
+    "date_summary",
+    "time_factor_mapping",
+    "feature_missing",
+    "group_m2",
+    "params_m2",
+    "report",
+    "html",
+    "result",
+    "test",
+    "m21_df",
+    "m22_df",
+    "m23_df",
+    "m24_df",
+]:
+    if name in globals():
+        del globals()[name]
+
+# Для Gini-ноутбука оставляем в final_df только то, что реально нужно группе M2.
+m2_needed_columns = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    DATE_COLUMN,
+    TARGET_COLUMN,
+    SCORE_COLUMN,
+    WEIGHT_COLUMN,
+    ID_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+
+extra_columns = [c for c in final_df.columns if c not in m2_needed_columns]
+if extra_columns:
+    final_df.drop(columns=extra_columns, inplace=True)
+    print(f"Dropped extra columns from final_df: {len(extra_columns)}")
+
+gc.collect()
+
+print(f"final_df memory: {final_df.memory_usage(deep=True).sum() / 1024**3:.2f} GB")
+if process is not None:
+    print(f"RAM after cleanup: {process.memory_info().rss / 1024**3:.2f} GB")
+```
+
+
+Ячейка 2. Запустить M2 аккуратно без повторного чтения данных
+-------------------------------------------------------------
+
+```python
+import gc
+from datetime import datetime
+
+from sbs_evaluation_tool.core.base_test import ModelReportBuilder, TestGroupBuilder
+from sbs_evaluation_tool.tests.m2_gini_tests import (
+    M21_GiniTest,
+    M22_GiniFactorsTest,
+    M23_GiniDynamicsTest,
+    M24_GiniUpliftTest,
+)
+
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+group_m2 = TestGroupBuilder(group_code="M2", group_name="M2. Gini")
+
+# M 2.1: только split/target/score/weight
+m21_df = final_df[[SAMPLE_COLUMN, TARGET_COLUMN, SCORE_COLUMN, WEIGHT_COLUMN]]
+t21 = M21_GiniTest()
+r21 = t21.run(df=m21_df, config=validated_config)
+group_m2.add_test(t21)
+group_m2.test_results["M 2.1"] = r21
+del m21_df, r21
+gc.collect()
+print("M 2.1 done:", t21.test_signal)
+
+# M 2.2: все факторы, но n_jobs=1
+m22_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+m22_df = final_df[m22_cols]
+t22 = M22_GiniFactorsTest()
+r22 = t22.run(df=m22_df, config=validated_config, n_jobs=1)
+group_m2.add_test(t22)
+group_m2.test_results["M 2.2"] = r22
+del m22_df, r22
+gc.collect()
+print("M 2.2 done:", t22.test_signal)
+
+# M 2.3: только split/date/target/score/weight
+m23_df = final_df[[SAMPLE_COLUMN, DATE_COLUMN, TARGET_COLUMN, SCORE_COLUMN, WEIGHT_COLUMN]]
+t23 = M23_GiniDynamicsTest()
+r23 = t23.run(df=m23_df, config=validated_config)
+group_m2.add_test(t23)
+group_m2.test_results["M 2.3"] = r23
+del m23_df, r23
+gc.collect()
+print("M 2.3 done:", t23.test_signal)
+
+# M 2.4: самый тяжелый. Лучше на сэмпле, иначе снова может упасть.
+M24_MAX_ROWS = 200_000
+m24_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+m24_df = final_df[m24_cols].sample(
+    n=min(len(final_df), M24_MAX_ROWS),
+    random_state=42,
+).copy()
+
+t24 = M24_GiniUpliftTest()
+r24 = t24.run(df=m24_df, config=validated_config, n_jobs=1)
+group_m2.add_test(t24)
+group_m2.test_results["M 2.4"] = r24
+del m24_df, r24
+gc.collect()
+print("M 2.4 done:", t24.test_signal)
+
+report = ModelReportBuilder()
+report.add_group(group_m2)
+html = report.generate_html()
+
+report_path = REPORTS_DIR / f"OMTPL_Retail_Classical_FREQ_gini_{datetime.now():%d_%m_%Y}.html"
+report_path.write_text(html, encoding="utf-8")
+
+del html
+gc.collect()
+
+print(f"Report saved: {report_path}")
+print("Signals:")
+for test in group_m2.tests:
+    print(f"  {test.test_code} {test.test_name}: {test.test_signal}")
+```
+
+
+Если нужно попробовать M 2.4 на всем датасете
+---------------------------------------------
+
+В Ячейке 2 замените блок:
+
+```python
+M24_MAX_ROWS = 200_000
+m24_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+m24_df = final_df[m24_cols].sample(
+    n=min(len(final_df), M24_MAX_ROWS),
+    random_state=42,
+).copy()
+```
+
+на:
+
+```python
+m24_cols = list(dict.fromkeys([
+    SAMPLE_COLUMN,
+    TARGET_COLUMN,
+    *numeric_features,
+    *categorical_features,
+]))
+m24_df = final_df[m24_cols]
+```
+
+Но это рискованно: M 2.4 самый тяжелый и может снова вызвать MemoryError.
+
