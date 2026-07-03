@@ -1,0 +1,481 @@
+Первичный анализ 4 Oracle-таблиц для подготовки к моделям
+Дата: 2026-07-03
+
+Зачем это нужно
+===============
+
+Перед построением моделей надо понять:
+- что лежит в каждой таблице;
+- какая сущность в одной строке: клиент, договор, объект, убыток и т.д.;
+- какие есть ключи для соединения таблиц;
+- есть ли готовая целевая переменная;
+- за какой период доступны данные;
+- насколько данные полные и чистые.
+
+Важно:
+- не выгружай реальные строки с клиентами, адресами, ИНН, кадастровыми номерами и суммами по конкретным объектам;
+- для обсуждения достаточно метаданных, агрегатов и названий колонок;
+- замени YOUR_SCHEMA, TABLE_1, TABLE_2, TABLE_3, TABLE_4 на реальные значения.
+
+
+0. Проверить, что таблицы доступны
+==================================
+
+SELECT
+    owner,
+    table_name,
+    num_rows,
+    last_analyzed
+FROM all_tables
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+ORDER BY table_name;
+
+
+1. Структура таблиц: колонки и типы данных
+=========================================
+
+SELECT
+    owner,
+    table_name,
+    column_id,
+    column_name,
+    data_type,
+    data_length,
+    data_precision,
+    data_scale,
+    nullable
+FROM all_tab_columns
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+ORDER BY table_name, column_id;
+
+
+2. Комментарии к колонкам, если они заведены в Oracle
+=====================================================
+
+SELECT
+    owner,
+    table_name,
+    column_name,
+    comments
+FROM all_col_comments
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+ORDER BY table_name, column_name;
+
+
+3. Количество строк в каждой таблице
+====================================
+
+SELECT 'TABLE_1' AS table_name, COUNT(*) AS row_count FROM YOUR_SCHEMA.TABLE_1
+UNION ALL
+SELECT 'TABLE_2' AS table_name, COUNT(*) AS row_count FROM YOUR_SCHEMA.TABLE_2
+UNION ALL
+SELECT 'TABLE_3' AS table_name, COUNT(*) AS row_count FROM YOUR_SCHEMA.TABLE_3
+UNION ALL
+SELECT 'TABLE_4' AS table_name, COUNT(*) AS row_count FROM YOUR_SCHEMA.TABLE_4;
+
+
+4. Primary key, foreign key, unique constraints
+==============================================
+
+Типы constraint:
+- P = primary key;
+- R = foreign key;
+- U = unique key.
+
+SELECT
+    c.owner,
+    c.table_name,
+    c.constraint_name,
+    c.constraint_type,
+    cc.position,
+    cc.column_name,
+    c.r_owner,
+    c.r_constraint_name
+FROM all_constraints c
+JOIN all_cons_columns cc
+  ON c.owner = cc.owner
+ AND c.constraint_name = cc.constraint_name
+WHERE c.owner = UPPER('YOUR_SCHEMA')
+  AND c.table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+  AND c.constraint_type IN ('P', 'R', 'U')
+ORDER BY c.table_name, c.constraint_type, c.constraint_name, cc.position;
+
+
+5. Foreign keys с расшифровкой, на какую таблицу они ссылаются
+==============================================================
+
+SELECT
+    c.owner,
+    c.table_name AS child_table,
+    cc.column_name AS child_column,
+    c.constraint_name AS fk_name,
+    rc.owner AS parent_owner,
+    rc.table_name AS parent_table,
+    rcc.column_name AS parent_column,
+    cc.position
+FROM all_constraints c
+JOIN all_cons_columns cc
+  ON c.owner = cc.owner
+ AND c.constraint_name = cc.constraint_name
+LEFT JOIN all_constraints rc
+  ON c.r_owner = rc.owner
+ AND c.r_constraint_name = rc.constraint_name
+LEFT JOIN all_cons_columns rcc
+  ON rc.owner = rcc.owner
+ AND rc.constraint_name = rcc.constraint_name
+ AND cc.position = rcc.position
+WHERE c.owner = UPPER('YOUR_SCHEMA')
+  AND c.table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+  AND c.constraint_type = 'R'
+ORDER BY child_table, fk_name, cc.position;
+
+
+6. Индексы
+==========
+
+SELECT
+    i.table_name,
+    i.index_name,
+    i.uniqueness,
+    ic.column_position,
+    ic.column_name
+FROM all_indexes i
+JOIN all_ind_columns ic
+  ON i.owner = ic.index_owner
+ AND i.index_name = ic.index_name
+WHERE i.owner = UPPER('YOUR_SCHEMA')
+  AND i.table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+ORDER BY i.table_name, i.index_name, ic.column_position;
+
+
+7. Статистика Oracle по колонкам
+================================
+
+Если статистика актуальная, этот запрос быстро покажет:
+- сколько уникальных значений примерно есть в колонке;
+- сколько null;
+- когда статистика обновлялась.
+
+SELECT
+    owner,
+    table_name,
+    column_name,
+    num_distinct,
+    num_nulls,
+    density,
+    histogram,
+    last_analyzed
+FROM all_tab_col_statistics
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+ORDER BY table_name, column_name;
+
+
+8. Найти все date/timestamp колонки
+===================================
+
+SELECT
+    table_name,
+    column_name,
+    data_type
+FROM all_tab_columns
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+  AND (
+      data_type = 'DATE'
+      OR data_type LIKE 'TIMESTAMP%'
+  )
+ORDER BY table_name, column_name;
+
+
+9. Проверить период данных по date-колонкам
+===========================================
+
+Запускать отдельно для каждой важной date-колонки.
+Замени TABLE_1 и DATE_COLUMN на реальные названия.
+
+SELECT
+    MIN(DATE_COLUMN) AS min_date,
+    MAX(DATE_COLUMN) AS max_date,
+    COUNT(DATE_COLUMN) AS filled_dates,
+    COUNT(*) - COUNT(DATE_COLUMN) AS null_dates
+FROM YOUR_SCHEMA.TABLE_1;
+
+
+10. Найти колонки, похожие на id/ключи
+======================================
+
+SELECT
+    table_name,
+    column_name,
+    data_type,
+    nullable
+FROM all_tab_columns
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+  AND (
+      LOWER(column_name) LIKE '%id%'
+      OR LOWER(column_name) LIKE '%key%'
+      OR LOWER(column_name) LIKE '%guid%'
+      OR LOWER(column_name) LIKE '%client%'
+      OR LOWER(column_name) LIKE '%customer%'
+      OR LOWER(column_name) LIKE '%contract%'
+      OR LOWER(column_name) LIKE '%policy%'
+      OR LOWER(column_name) LIKE '%claim%'
+      OR LOWER(column_name) LIKE '%object%'
+      OR LOWER(column_name) LIKE '%cad%'
+      OR LOWER(column_name) LIKE '%inn%'
+      OR LOWER(column_name) LIKE '%клиент%'
+      OR LOWER(column_name) LIKE '%договор%'
+      OR LOWER(column_name) LIKE '%полис%'
+      OR LOWER(column_name) LIKE '%объект%'
+      OR LOWER(column_name) LIKE '%убыт%'
+      OR LOWER(column_name) LIKE '%кадастр%'
+      OR LOWER(column_name) LIKE '%инн%'
+  )
+ORDER BY table_name, column_name;
+
+
+11. Найти возможные target-колонки
+==================================
+
+Для разных моделей target может быть разный:
+- стоимость недвижимости в рублях;
+- страховая сумма;
+- факт негативного события;
+- факт убытка;
+- сумма убытка;
+- размер ущерба.
+
+SELECT
+    table_name,
+    column_name,
+    data_type,
+    nullable
+FROM all_tab_columns
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+  AND (
+      LOWER(column_name) LIKE '%cost%'
+      OR LOWER(column_name) LIKE '%price%'
+      OR LOWER(column_name) LIKE '%value%'
+      OR LOWER(column_name) LIKE '%sum%'
+      OR LOWER(column_name) LIKE '%amount%'
+      OR LOWER(column_name) LIKE '%loss%'
+      OR LOWER(column_name) LIKE '%claim%'
+      OR LOWER(column_name) LIKE '%damage%'
+      OR LOWER(column_name) LIKE '%score%'
+      OR LOWER(column_name) LIKE '%premium%'
+      OR LOWER(column_name) LIKE '%insured%'
+      OR LOWER(column_name) LIKE '%оцен%'
+      OR LOWER(column_name) LIKE '%стоим%'
+      OR LOWER(column_name) LIKE '%сумм%'
+      OR LOWER(column_name) LIKE '%убыт%'
+      OR LOWER(column_name) LIKE '%ущерб%'
+      OR LOWER(column_name) LIKE '%страх%'
+      OR LOWER(column_name) LIKE '%прем%'
+      OR LOWER(column_name) LIKE '%скор%'
+      OR LOWER(column_name) LIKE '%снос%'
+      OR LOWER(column_name) LIKE '%повреж%'
+  )
+ORDER BY table_name, column_name;
+
+
+12. Найти числовые колонки
+==========================
+
+SELECT
+    table_name,
+    column_name,
+    data_type,
+    data_precision,
+    data_scale,
+    nullable
+FROM all_tab_columns
+WHERE owner = UPPER('YOUR_SCHEMA')
+  AND table_name IN (
+      UPPER('TABLE_1'),
+      UPPER('TABLE_2'),
+      UPPER('TABLE_3'),
+      UPPER('TABLE_4')
+  )
+  AND data_type IN ('NUMBER', 'FLOAT', 'BINARY_FLOAT', 'BINARY_DOUBLE')
+ORDER BY table_name, column_name;
+
+
+13. Проверить дубли по предполагаемому ключу
+============================================
+
+Запускать после того, как найден предполагаемый id.
+Замени TABLE_1 и ID_COLUMN на реальные названия.
+
+SELECT
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT ID_COLUMN) AS distinct_id_count,
+    COUNT(*) - COUNT(DISTINCT ID_COLUMN) AS duplicate_count
+FROM YOUR_SCHEMA.TABLE_1;
+
+
+14. Проверить пропуски по важной колонке
+========================================
+
+Запускать для важных колонок: id, дата, target, сумма, объект, договор.
+Замени TABLE_1 и IMPORTANT_COLUMN на реальные названия.
+
+SELECT
+    COUNT(*) AS row_count,
+    COUNT(IMPORTANT_COLUMN) AS filled_count,
+    COUNT(*) - COUNT(IMPORTANT_COLUMN) AS null_count,
+    ROUND((COUNT(*) - COUNT(IMPORTANT_COLUMN)) / COUNT(*) * 100, 2) AS null_percent
+FROM YOUR_SCHEMA.TABLE_1;
+
+
+15. Проверить числовую колонку на диапазон и странные значения
+==============================================================
+
+Замени TABLE_1 и NUMERIC_COLUMN на реальные названия.
+
+SELECT
+    COUNT(*) AS row_count,
+    COUNT(NUMERIC_COLUMN) AS filled_count,
+    COUNT(*) - COUNT(NUMERIC_COLUMN) AS null_count,
+    MIN(NUMERIC_COLUMN) AS min_value,
+    MAX(NUMERIC_COLUMN) AS max_value,
+    AVG(NUMERIC_COLUMN) AS avg_value,
+    SUM(CASE WHEN NUMERIC_COLUMN < 0 THEN 1 ELSE 0 END) AS negative_count,
+    SUM(CASE WHEN NUMERIC_COLUMN = 0 THEN 1 ELSE 0 END) AS zero_count
+FROM YOUR_SCHEMA.TABLE_1;
+
+
+16. Проверить возможный join между двумя таблицами
+==================================================
+
+Замени:
+- TABLE_LEFT, TABLE_RIGHT;
+- LEFT_KEY, RIGHT_KEY.
+
+Этот запрос показывает, сколько строк из левой таблицы нашлось в правой.
+
+SELECT
+    COUNT(*) AS left_rows,
+    COUNT(r.RIGHT_KEY) AS matched_rows,
+    COUNT(*) - COUNT(r.RIGHT_KEY) AS not_matched_rows,
+    ROUND(COUNT(r.RIGHT_KEY) / COUNT(*) * 100, 2) AS matched_percent
+FROM YOUR_SCHEMA.TABLE_LEFT l
+LEFT JOIN YOUR_SCHEMA.TABLE_RIGHT r
+  ON l.LEFT_KEY = r.RIGHT_KEY;
+
+
+17. Проверить, не размножает ли join строки
+===========================================
+
+Если после join строк стало намного больше, значит связь не один-к-одному.
+Это не всегда ошибка, но для модельной витрины это важно понимать.
+
+Замени TABLE_LEFT, TABLE_RIGHT, LEFT_KEY, RIGHT_KEY.
+
+SELECT
+    COUNT(*) AS joined_rows,
+    COUNT(DISTINCT l.LEFT_KEY) AS distinct_left_keys
+FROM YOUR_SCHEMA.TABLE_LEFT l
+JOIN YOUR_SCHEMA.TABLE_RIGHT r
+  ON l.LEFT_KEY = r.RIGHT_KEY;
+
+
+18. Проверить распределение категориальной колонки
+==================================================
+
+Запускать только для не чувствительных колонок: тип продукта, регион, сегмент, отрасль.
+Не запускай для ИНН, адресов, ФИО, кадастровых номеров.
+
+Замени TABLE_1 и CATEGORY_COLUMN на реальные названия.
+
+SELECT
+    CATEGORY_COLUMN,
+    COUNT(*) AS row_count
+FROM YOUR_SCHEMA.TABLE_1
+GROUP BY CATEGORY_COLUMN
+ORDER BY row_count DESC
+FETCH FIRST 30 ROWS ONLY;
+
+
+19. Что прислать мне после запуска
+==================================
+
+Можно прислать без реальных персональных или коммерчески чувствительных строк:
+
+1. Названия 4 таблиц.
+2. Результат запроса 1: структура таблиц.
+3. Результат запроса 2: комментарии колонок, если есть.
+4. Результат запроса 3: количество строк.
+5. Результат запроса 4 или 5: ключи и связи.
+6. Результат запроса 8: date-колонки.
+7. Min/max даты по важным date-колонкам из запроса 9.
+8. Результат запроса 10: колонки, похожие на ключи.
+9. Результат запроса 11: возможные target-колонки.
+10. Коротко своими словами: что, по твоему пониманию, означает каждая таблица.
+
+
+20. На что будем смотреть после этого
+=====================================
+
+После этих запросов можно будет понять:
+- есть ли target для модели стоимости недвижимости;
+- можно ли собрать target для скоринга недвижимости;
+- есть ли история убытков для модели убыточности;
+- какие таблицы можно соединить;
+- какая будет одна строка модельной витрины: объект, договор, клиент или клиент-год;
+- подходит ли задача под GLM, LightAutoML или сначала нужна rule-based логика.
