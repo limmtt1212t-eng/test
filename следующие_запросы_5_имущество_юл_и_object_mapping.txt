@@ -1,0 +1,386 @@
+Следующие запросы 5: ИМЩ ЮЛ и поиск object mapping
+Дата: 2026-07-06
+
+Зачем это нужно
+===============
+
+По результатам 90-104 стало понятно:
+- CONTRACTS + LOSSES подходят для модели убыточности;
+- но общий sample смешивает ОСАГО, КАСКО, карты, ипотеку, защиту дома и т.д.;
+- для проекта нужен ИМЩ ЮЛ / недвижимость ЮЛ;
+- связь страхового объекта с кадастром пока не найдена.
+
+Цель этих запросов:
+1. Найти договоры ИМЩ ЮЛ.
+2. Найти убытки ИМЩ ЮЛ.
+3. Проверить, хватает ли target для модели убыточности ИМЩ ЮЛ.
+4. Проверить, какие object_id используются в ИМЩ ЮЛ.
+5. Найти возможный путь от object_id к BUILDINGS / ESTATE_OBJECTS.
+
+Сохраняй результаты в:
+анализ таблиц/results
+
+Формат:
+CSV, UTF-8 или UTF-8 with BOM, разделитель ;
+
+Если запрос долго выполняется:
+останови и напиши мне номер запроса.
+
+
+110. CONTRACTS: продукты ИМЩ ЮЛ / похожие продукты
+==================================================
+
+Сохрани как:
+110_contracts_imush_ul_products.csv
+
+SELECT
+    PRODUCT_GROUP,
+    PRODUCT_TYPE,
+    PRODUCT_1C_NAME,
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT CONTRACT_ID) AS contract_count,
+    COUNT(DISTINCT CLIENT_ID) AS client_count,
+    COUNT(OBJECT_ID) AS filled_object_id,
+    COUNT(PREM_SUM_RUB) AS filled_prem_sum_rub,
+    COUNT(OTV_SUM_RUB) AS filled_otv_sum_rub
+FROM DM_RISK_AVATAR.CONTRACTS
+WHERE LOWER(PRODUCT_GROUP) LIKE '%страхование юл%'
+   OR LOWER(PRODUCT_GROUP) LIKE '%залоговое страхование юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имущество юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имуществ%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%имущество юридических лиц%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%июл%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%залоги%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%сверхлимит%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%смр%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%строительно-монтаж%'
+GROUP BY PRODUCT_GROUP, PRODUCT_TYPE, PRODUCT_1C_NAME
+ORDER BY row_count DESC;
+
+
+111. LOSSES: убытки ИМЩ ЮЛ / похожие продукты
+=============================================
+
+Сохрани как:
+111_losses_imush_ul_products.csv
+
+SELECT
+    PRODUCT_GROUP,
+    PRODUCT_TYPE,
+    PRODUCT_1C_NAME,
+    COUNT(*) AS loss_row_count,
+    COUNT(DISTINCT CLAIM_ID) AS claim_count,
+    COUNT(DISTINCT CONTRACT_ID) AS contract_count,
+    COUNT(DISTINCT CLIENT_ID) AS client_count,
+    COUNT(OBJECT_ID) AS filled_object_id,
+    COUNT(PAY_CLAIM_TOTAL) AS filled_pay_claim_total,
+    SUM(PAY_CLAIM_TOTAL) AS pay_claim_total_sum
+FROM DM_RISK_AVATAR.LOSSES
+WHERE LOWER(PRODUCT_GROUP) LIKE '%страхование юл%'
+   OR LOWER(PRODUCT_GROUP) LIKE '%залоговое страхование юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имущество юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имуществ%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%имущество юридических лиц%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%июл%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%залоги%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%сверхлимит%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%смр%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%строительно-монтаж%'
+GROUP BY PRODUCT_GROUP, PRODUCT_TYPE, PRODUCT_1C_NAME
+ORDER BY loss_row_count DESC;
+
+
+112. LOSSES: риски внутри ИМЩ ЮЛ / похожих продуктов
+====================================================
+
+Сохрани как:
+112_losses_imush_ul_risks.csv
+
+SELECT
+    PRODUCT_GROUP,
+    PRODUCT_TYPE,
+    LOSS_RISK,
+    SFERA_RISK,
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT CLAIM_ID) AS claim_count,
+    SUM(PAY_CLAIM_TOTAL) AS pay_claim_total_sum
+FROM DM_RISK_AVATAR.LOSSES
+WHERE LOWER(PRODUCT_GROUP) LIKE '%страхование юл%'
+   OR LOWER(PRODUCT_GROUP) LIKE '%залоговое страхование юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имущество юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имуществ%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%имущество юридических лиц%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%июл%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%залоги%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%сверхлимит%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%смр%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%строительно-монтаж%'
+GROUP BY PRODUCT_GROUP, PRODUCT_TYPE, LOSS_RISK, SFERA_RISK
+ORDER BY row_count DESC;
+
+
+113. Join: договоры ИМЩ ЮЛ -> убытки
+====================================
+
+Сохрани как:
+113_join_contracts_losses_imush_ul_sample.csv
+
+WITH c AS (
+    SELECT
+        CONTRACT_ID,
+        CLIENT_ID,
+        OBJECT_ID,
+        PRODUCT_GROUP,
+        PRODUCT_TYPE,
+        PRODUCT_1C_NAME,
+        PREM_SUM_RUB,
+        OTV_SUM_RUB
+    FROM DM_RISK_AVATAR.CONTRACTS
+    WHERE (
+           LOWER(PRODUCT_GROUP) LIKE '%страхование юл%'
+        OR LOWER(PRODUCT_GROUP) LIKE '%залоговое страхование юл%'
+        OR LOWER(PRODUCT_TYPE) LIKE '%имущество юл%'
+        OR LOWER(PRODUCT_TYPE) LIKE '%имуществ%'
+        OR LOWER(PRODUCT_1C_NAME) LIKE '%имущество юридических лиц%'
+        OR LOWER(PRODUCT_1C_NAME) LIKE '%июл%'
+        OR LOWER(PRODUCT_1C_NAME) LIKE '%залоги%'
+        OR LOWER(PRODUCT_1C_NAME) LIKE '%сверхлимит%'
+        OR LOWER(PRODUCT_1C_NAME) LIKE '%смр%'
+        OR LOWER(PRODUCT_1C_NAME) LIKE '%строительно-монтаж%'
+    )
+      AND ROWNUM <= 100000
+),
+l AS (
+    SELECT
+        CONTRACT_ID,
+        CLAIM_ID,
+        PAY_CLAIM_TOTAL
+    FROM DM_RISK_AVATAR.LOSSES
+)
+SELECT
+    COUNT(*) AS joined_rows,
+    COUNT(DISTINCT c.CONTRACT_ID) AS sample_contracts,
+    COUNT(DISTINCT l.CLAIM_ID) AS matched_claims,
+    COUNT(l.CONTRACT_ID) AS matched_loss_rows,
+    SUM(l.PAY_CLAIM_TOTAL) AS matched_pay_claim_total
+FROM c
+LEFT JOIN l
+  ON c.CONTRACT_ID = l.CONTRACT_ID;
+
+
+114. STG_CONTRACT_OBJRISK: строки ИМЩ ЮЛ по объектам/рискам
+===========================================================
+
+Сохрани как:
+114_stg_objrisk_imush_ul_objtype_risk.csv
+
+SELECT
+    OBJ_TYPE,
+    RISK_NAME,
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT CONTRACT_ID) AS contract_count,
+    COUNT(DISTINCT CLIENT_ID) AS client_count,
+    COUNT(DISTINCT INSURED_OBJ_ID) AS insured_obj_count,
+    COUNT(OBJ_ADDRESS) AS filled_obj_address
+FROM DM_RISK_AVATAR.STG_CONTRACT_OBJRISK
+WHERE LOWER(OBJ_TYPE) LIKE '%юридических лиц%'
+   OR LOWER(OBJ_TYPE) LIKE '%имущество%'
+   OR LOWER(OBJ_TYPE) LIKE '%строен%'
+   OR LOWER(OBJ_TYPE) LIKE '%здан%'
+   OR LOWER(OBJ_TYPE) LIKE '%склад%'
+   OR LOWER(RISK_NAME) LIKE '%июл%'
+   OR LOWER(RISK_NAME) LIKE '%имущество%'
+   OR LOWER(RISK_NAME) LIKE '%залоги%'
+   OR LOWER(RISK_NAME) LIKE '%смр%'
+   OR LOWER(RISK_NAME) LIKE '%строительно-монтаж%'
+GROUP BY OBJ_TYPE, RISK_NAME
+ORDER BY row_count DESC;
+
+
+115. STG_CONTRACT_OBJRISK: качество ключей по ИМЩ ЮЛ sample
+===========================================================
+
+Сохрани как:
+115_stg_objrisk_imush_ul_key_quality_sample.csv
+
+SELECT
+    COUNT(*) AS sample_rows,
+    COUNT(CONTRACT_ID) AS filled_contract_id,
+    COUNT(CLIENT_ID) AS filled_client_id,
+    COUNT(INSURED_OBJ_ID) AS filled_insured_obj_id,
+    COUNT(OBJ_ADDRESS) AS filled_obj_address,
+    COUNT(RISK_NAME) AS filled_risk_name,
+    COUNT(OBJ_TYPE) AS filled_obj_type,
+    COUNT(DISTINCT CONTRACT_ID) AS distinct_contracts,
+    COUNT(DISTINCT CLIENT_ID) AS distinct_clients,
+    COUNT(DISTINCT INSURED_OBJ_ID) AS distinct_insured_objects
+FROM (
+    SELECT *
+    FROM DM_RISK_AVATAR.STG_CONTRACT_OBJRISK
+    WHERE (
+           LOWER(OBJ_TYPE) LIKE '%юридических лиц%'
+        OR LOWER(OBJ_TYPE) LIKE '%имущество%'
+        OR LOWER(OBJ_TYPE) LIKE '%строен%'
+        OR LOWER(OBJ_TYPE) LIKE '%здан%'
+        OR LOWER(OBJ_TYPE) LIKE '%склад%'
+        OR LOWER(RISK_NAME) LIKE '%июл%'
+        OR LOWER(RISK_NAME) LIKE '%имущество%'
+        OR LOWER(RISK_NAME) LIKE '%залоги%'
+        OR LOWER(RISK_NAME) LIKE '%смр%'
+        OR LOWER(RISK_NAME) LIKE '%строительно-монтаж%'
+    )
+      AND ROWNUM <= 100000
+);
+
+
+116. STG ИМЩ ЮЛ -> CONTRACTS по CONTRACT_ID
+===========================================
+
+Сохрани как:
+116_join_stg_imush_ul_contracts_by_contract_id_sample.csv
+
+WITH s AS (
+    SELECT CONTRACT_ID, CLIENT_ID, INSURED_OBJ_ID
+    FROM DM_RISK_AVATAR.STG_CONTRACT_OBJRISK
+    WHERE (
+           LOWER(OBJ_TYPE) LIKE '%юридических лиц%'
+        OR LOWER(OBJ_TYPE) LIKE '%имущество%'
+        OR LOWER(OBJ_TYPE) LIKE '%строен%'
+        OR LOWER(OBJ_TYPE) LIKE '%здан%'
+        OR LOWER(OBJ_TYPE) LIKE '%склад%'
+        OR LOWER(RISK_NAME) LIKE '%июл%'
+        OR LOWER(RISK_NAME) LIKE '%имущество%'
+        OR LOWER(RISK_NAME) LIKE '%залоги%'
+        OR LOWER(RISK_NAME) LIKE '%смр%'
+        OR LOWER(RISK_NAME) LIKE '%строительно-монтаж%'
+    )
+      AND ROWNUM <= 100000
+)
+SELECT
+    COUNT(*) AS sample_stg_rows,
+    COUNT(c.CONTRACT_ID) AS matched_contract_rows,
+    COUNT(DISTINCT s.CONTRACT_ID) AS distinct_stg_contracts,
+    COUNT(DISTINCT c.CONTRACT_ID) AS distinct_matched_contracts
+FROM s
+LEFT JOIN DM_RISK_AVATAR.CONTRACTS c
+  ON s.CONTRACT_ID = c.CONTRACT_ID;
+
+
+117. STG ИМЩ ЮЛ -> BUILDINGS по адресу sample
+=============================================
+
+Сохрани как:
+117_join_stg_imush_ul_buildings_by_address_sample.csv
+
+WITH s AS (
+    SELECT OBJ_ADDRESS
+    FROM DM_RISK_AVATAR.STG_CONTRACT_OBJRISK
+    WHERE OBJ_ADDRESS IS NOT NULL
+      AND (
+           LOWER(OBJ_TYPE) LIKE '%юридических лиц%'
+        OR LOWER(OBJ_TYPE) LIKE '%имущество%'
+        OR LOWER(OBJ_TYPE) LIKE '%строен%'
+        OR LOWER(OBJ_TYPE) LIKE '%здан%'
+        OR LOWER(OBJ_TYPE) LIKE '%склад%'
+        OR LOWER(RISK_NAME) LIKE '%июл%'
+        OR LOWER(RISK_NAME) LIKE '%имущество%'
+        OR LOWER(RISK_NAME) LIKE '%залоги%'
+        OR LOWER(RISK_NAME) LIKE '%смр%'
+        OR LOWER(RISK_NAME) LIKE '%строительно-монтаж%'
+      )
+      AND ROWNUM <= 10000
+)
+SELECT
+    COUNT(*) AS sample_stg_rows,
+    COUNT(b.CAD_IND) AS matched_buildings_rows
+FROM s
+LEFT JOIN DM_RISK_AVATAR.BUILDINGS b
+  ON UPPER(TRIM(s.OBJ_ADDRESS)) = UPPER(TRIM(b.ADDRESS));
+
+
+118. CONTRACTS ИМЩ ЮЛ: качество OBJECT_ID
+=========================================
+
+Сохрани как:
+118_contracts_imush_ul_object_quality.csv
+
+SELECT
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT CONTRACT_ID) AS contract_count,
+    COUNT(CLIENT_ID) AS filled_client_id,
+    COUNT(OBJECT_ID) AS filled_object_id,
+    COUNT(DISTINCT OBJECT_ID) AS distinct_object_id,
+    COUNT(PREM_SUM_RUB) AS filled_prem_sum_rub,
+    COUNT(OTV_SUM_RUB) AS filled_otv_sum_rub
+FROM DM_RISK_AVATAR.CONTRACTS
+WHERE LOWER(PRODUCT_GROUP) LIKE '%страхование юл%'
+   OR LOWER(PRODUCT_GROUP) LIKE '%залоговое страхование юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имущество юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имуществ%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%имущество юридических лиц%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%июл%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%залоги%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%сверхлимит%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%смр%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%строительно-монтаж%';
+
+
+119. LOSSES ИМЩ ЮЛ: качество target
+===================================
+
+Сохрани как:
+119_losses_imush_ul_target_quality.csv
+
+SELECT
+    COUNT(*) AS row_count,
+    COUNT(DISTINCT CLAIM_ID) AS claim_count,
+    COUNT(DISTINCT CONTRACT_ID) AS contract_count,
+    COUNT(DISTINCT CLIENT_ID) AS client_count,
+    COUNT(OBJECT_ID) AS filled_object_id,
+    COUNT(PAY_CLAIM_TOTAL) AS filled_pay_claim_total,
+    SUM(PAY_CLAIM_TOTAL) AS pay_claim_total_sum,
+    MIN(CLAIM_DATE) AS min_claim_date,
+    MAX(CLAIM_DATE) AS max_claim_date
+FROM DM_RISK_AVATAR.LOSSES
+WHERE LOWER(PRODUCT_GROUP) LIKE '%страхование юл%'
+   OR LOWER(PRODUCT_GROUP) LIKE '%залоговое страхование юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имущество юл%'
+   OR LOWER(PRODUCT_TYPE) LIKE '%имуществ%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%имущество юридических лиц%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%июл%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%залоги%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%сверхлимит%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%смр%'
+   OR LOWER(PRODUCT_1C_NAME) LIKE '%строительно-монтаж%';
+
+
+Что потом скинуть мне
+=====================
+
+Положи в results:
+
+110_contracts_imush_ul_products.csv
+111_losses_imush_ul_products.csv
+112_losses_imush_ul_risks.csv
+113_join_contracts_losses_imush_ul_sample.csv
+114_stg_objrisk_imush_ul_objtype_risk.csv
+115_stg_objrisk_imush_ul_key_quality_sample.csv
+116_join_stg_imush_ul_contracts_by_contract_id_sample.csv
+117_join_stg_imush_ul_buildings_by_address_sample.csv
+118_contracts_imush_ul_object_quality.csv
+119_losses_imush_ul_target_quality.csv
+
+Если что-то не запустилось:
+напиши номера запросов.
+
+
+Что я сделаю после этого
+========================
+
+Я смогу ответить:
+
+1. Есть ли достаточно договоров ИМЩ ЮЛ.
+2. Есть ли достаточно убытков ИМЩ ЮЛ.
+3. Можно ли строить убыточность именно по ИМЩ ЮЛ.
+4. Можно ли связать ИМЩ ЮЛ с объектами недвижимости.
+5. Какие модели реально готовы, а какие пока нет.
