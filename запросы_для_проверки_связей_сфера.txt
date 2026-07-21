@@ -1,0 +1,283 @@
+ДИАГНОСТИЧЕСКИЕ ЗАПРОСЫ ДЛЯ «СФЕРЫ»
+=====================================
+
+Назначение файла
+----------------
+Запросы проверяют качество связей между объектами, задачами оформления,
+клиентами и убытками. Они не изменяют данные.
+
+Запускайте каждый запрос отдельно в DBeaver.
+
+
+ОГРАНИЧЕНИЕ ВРЕМЕНИ ВЫПОЛНЕНИЯ
+------------------------------
+
+Перед началом работы один раз выполните:
+
+set statement_timeout = '60s';
+
+
+ЗАПРОС 1. ПРОВЕРКА СВЯЗЕЙ ОБЪЕКТА
+---------------------------------
+
+Проверяет 1 000 последних объектов:
+- есть ли характеристики;
+- заполнен ли characteristics JSONB;
+- есть ли условия страхования;
+- есть ли адрес;
+- размножаются ли строки после соединений.
+
+with recent_objects as (
+    select
+        id,
+        geo_address_id,
+        d_create
+    from base_insurance_object
+    where elementary_obj_type in (
+        'nedv_ul_and_ip',
+        'business_interruption'
+    )
+    order by d_create desc
+    limit 1000
+)
+
+select
+    count(distinct obj.id) as total_objects,
+
+    count(distinct obj.id)
+        filter (where oc.id is not null)
+        as objects_with_characteristics,
+
+    count(distinct obj.id)
+        filter (
+            where oc.characteristics is not null
+              and oc.characteristics <> '{}'::jsonb
+        )
+        as objects_with_json,
+
+    count(distinct obj.id)
+        filter (where ot.id is not null)
+        as objects_with_conditions,
+
+    count(distinct obj.id)
+        filter (where geo.id is not null)
+        as objects_with_address,
+
+    count(*) as rows_after_joins,
+
+    count(*) - count(distinct obj.id)
+        as extra_rows_after_joins
+
+from recent_objects obj
+
+left join base_insurance_object_characteristics oc
+    on oc.insurance_object_id = obj.id
+
+left join base_insurance_object_conditions ot
+    on ot.characteristics_id = oc.id
+
+left join base_geo_address geo
+    on geo.id = obj.geo_address_id;
+
+
+ЗАПРОС 2. ПРОВЕРКА ЦЕПОЧКИ «ЗАДАЧА → КЛИЕНТ → ОБЪЕКТ»
+------------------------------------------------------
+
+Проверяет 1 000 последних задач, подходящих под фильтры исходного запроса:
+- находится ли заявка;
+- находится ли CRM-карточка;
+- находится ли клиент;
+- находится ли объект;
+- есть ли условия и адрес;
+- размножаются ли строки после соединений.
+
+with recent_tasks as (
+    select
+        id,
+        request_ins_id,
+        d_create
+    from bps_request_ins_task
+    where task_type = 'draft_contract'
+      and status = 'operational_archive'
+      and (
+          ins_document_type in (
+              'new_ins_contract',
+              'ins_contract_prolong'
+          )
+          or ins_document_type is null
+      )
+    order by d_create desc
+    limit 1000
+)
+
+select
+    count(distinct t.id) as total_tasks,
+
+    count(distinct t.id)
+        filter (where r.id is not null)
+        as tasks_with_request,
+
+    count(distinct t.id)
+        filter (where bcc.id is not null)
+        as tasks_with_crm,
+
+    count(distinct t.id)
+        filter (where bc.id is not null)
+        as tasks_with_client,
+
+    count(distinct t.id)
+        filter (where tobj.id is not null)
+        as tasks_with_object_link,
+
+    count(distinct t.id)
+        filter (where oc.id is not null)
+        as tasks_with_characteristics,
+
+    count(distinct t.id)
+        filter (where obj.id is not null)
+        as tasks_with_target_object,
+
+    count(distinct t.id)
+        filter (where ot.id is not null)
+        as tasks_with_object_conditions,
+
+    count(distinct t.id)
+        filter (where geo.id is not null)
+        as tasks_with_object_address,
+
+    count(distinct obj.id) as target_objects,
+
+    count(*) as rows_after_joins,
+
+    count(*) - count(distinct t.id)
+        as extra_rows_after_joins
+
+from recent_tasks t
+
+left join bps_request_ins r
+    on r.id = t.request_ins_id
+
+left join bps_corporate_crm bcc
+    on bcc.id = r.corporate_crm_id
+
+left join bps_contractor bc
+    on bc.id = bcc.client_id
+
+left join bps_request_ins_task_insurance_object tobj
+    on tobj.parent_id = t.id
+
+left join base_insurance_object_characteristics oc
+    on oc.id = tobj.characteristics_id
+
+left join base_insurance_object obj
+    on obj.id = oc.insurance_object_id
+   and obj.elementary_obj_type in (
+       'nedv_ul_and_ip',
+       'business_interruption'
+   )
+
+left join base_insurance_object_conditions ot
+    on ot.characteristics_id = oc.id
+
+left join base_geo_address geo
+    on geo.id = obj.geo_address_id;
+
+
+ЗАПРОС 3. ПРОВЕРКА СВЯЗЕЙ УБЫТКА
+--------------------------------
+
+Проверяет 1 000 последних убытков:
+- заполнена ли ссылка на задачу;
+- находится ли задача;
+- совпадают ли номера договоров;
+- с какой таблицей технически совпадает appliant_id.
+
+with recent_claims as (
+    select
+        id,
+        d_create,
+        appliant_id,
+        request_ins_tasks_id,
+        n_contract
+    from bps_corporate_claim
+    order by d_create desc
+    limit 1000
+)
+
+select
+    count(*) as total_claims,
+
+    count(*)
+        filter (where cl.request_ins_tasks_id is not null)
+        as claims_with_task_id,
+
+    count(*)
+        filter (where t.id is not null)
+        as claims_matched_to_task,
+
+    count(*)
+        filter (
+            where cl.request_ins_tasks_id is not null
+              and t.id is null
+        )
+        as broken_task_links,
+
+    count(*)
+        filter (
+            where nullif(trim(cl.n_contract), '') is not null
+              and nullif(trim(t.contract_num_policy), '') is not null
+        )
+        as claims_with_two_contract_numbers,
+
+    count(*)
+        filter (
+            where nullif(trim(cl.n_contract), '') is not null
+              and nullif(trim(t.contract_num_policy), '') is not null
+              and trim(cl.n_contract) = trim(t.contract_num_policy)
+        )
+        as matching_contract_numbers,
+
+    count(*)
+        filter (where cl.appliant_id is not null)
+        as claims_with_appliant_id,
+
+    count(*)
+        filter (where bc_direct.id is not null)
+        as appliant_matches_contractor,
+
+    count(*)
+        filter (where bcc_by_appliant.id is not null)
+        as appliant_matches_crm,
+
+    count(*)
+        filter (where bc_via_crm.id is not null)
+        as appliant_leads_to_contractor_via_crm
+
+from recent_claims cl
+
+left join bps_request_ins_task t
+    on t.id = cl.request_ins_tasks_id
+
+left join bps_contractor bc_direct
+    on bc_direct.id = cl.appliant_id
+
+left join bps_corporate_crm bcc_by_appliant
+    on bcc_by_appliant.id = cl.appliant_id
+
+left join bps_contractor bc_via_crm
+    on bc_via_crm.id = bcc_by_appliant.client_id;
+
+
+ЧТО СОХРАНИТЬ ПОСЛЕ ЗАПУСКА
+---------------------------
+
+Каждый запрос возвращает одну итоговую строку с числами.
+Сохраните или скопируйте эту строку для последующего анализа.
+
+Наиболее важные поля:
+- extra_rows_after_joins — сколько дополнительных строк создали соединения;
+- tasks_with_client — сколько задач удалось связать с клиентом;
+- tasks_with_target_object — сколько задач связано с нужным объектом;
+- claims_matched_to_task — сколько убытков связано с задачей;
+- matching_contract_numbers — у скольких связанных записей совпали номера договора;
+- последние три показателя запроса 3 — к какой таблице технически подходит appliant_id.
