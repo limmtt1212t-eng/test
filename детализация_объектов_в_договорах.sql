@@ -22,8 +22,18 @@ object_rows as (
         obj.obj_name,
         obj.obj_type,
         obj.elementary_obj_type,
+        obj.description,
         obj.original_address,
-        geo.full_address
+        geo.full_address,
+        op.insurance_territory,
+        op.insured_components,
+        op.activity_types,
+        op.risk_natures,
+        op.characteristics,
+        t.object_description as task_object_description,
+        t.insurance_object_purpose,
+        t.insurance_object_other_purpose,
+        r.comment_object_type
 
     from recent_tasks t
 
@@ -101,11 +111,41 @@ select
     obj.elementary_obj_type
         as "Подтип объекта",
 
+    obj.description
+        as "Описание объекта",
+
     obj.original_address
         as "Адрес как его ввели",
 
     obj.full_address
-        as "Нормализованный адрес"
+        as "Нормализованный адрес",
+
+    obj.insurance_territory
+        as "Территория страхования",
+
+    obj.insured_components
+        as "Что входит в страхование",
+
+    obj.activity_types
+        as "Виды деятельности",
+
+    obj.risk_natures
+        as "Характеры риска",
+
+    obj.characteristics
+        as "Характеристики JSONB",
+
+    obj.task_object_description
+        as "Описание объекта в задаче",
+
+    obj.insurance_object_purpose
+        as "Назначение объекта в задаче",
+
+    obj.insurance_object_other_purpose
+        as "Иное назначение объекта",
+
+    obj.comment_object_type
+        as "Комментарий к типу объекта в заявке"
 
 from numbered_contracts nc
 
