@@ -8,24 +8,24 @@ INPUT_CSV = Path(r"C:\путь\объекты.csv")
 OUTPUT_CSV = Path(r"C:\путь\объекты_для_excel.csv")
 
 
-UTF8_BOM = b"\xef\xbb\xbf"
 source_bytes = INPUT_CSV.read_bytes()
 
-# Убираем BOM из рабочей копии, если он уже был, чтобы не продублировать его.
-if source_bytes.startswith(UTF8_BOM):
-    source_bytes = source_bytes[len(UTF8_BOM):]
+# Исходная выгрузка DBeaver имеет кодировку UTF-8. Декодирование utf-8-sig
+# одинаково работает и с BOM, и без него.
+source_text = source_bytes.decode("utf-8-sig")
 
 # sep=; — служебная строка Excel. Она заставляет Excel использовать
 # точку с запятой независимо от региональных настроек компьютера.
-EXCEL_SEPARATOR_HINT = b"sep=;\r\n"
+EXCEL_SEPARATOR_HINT = "sep=;\r\n"
 
-if not source_bytes.lower().startswith(b"sep=;"):
-    source_bytes = EXCEL_SEPARATOR_HINT + source_bytes
+if not source_text.lower().startswith("sep=;"):
+    source_text = EXCEL_SEPARATOR_HINT + source_text
 
-# Исходный файл не изменяется. В новую копию добавляются только:
-# 1) метка кодировки UTF-8 BOM;
-# 2) подсказка Excel о разделителе столбцов.
-output_bytes = UTF8_BOM + source_bytes
+# UTF-16 LE с BOM Excel надёжно распознаёт в разных версиях Windows
+# независимо от региональных настроек. Содержание значений сохраняется:
+# меняется только внешняя кодировка Excel-копии.
+UTF16LE_BOM = b"\xff\xfe"
+output_bytes = UTF16LE_BOM + source_text.encode("utf-16-le")
 
 OUTPUT_CSV.write_bytes(output_bytes)
 
