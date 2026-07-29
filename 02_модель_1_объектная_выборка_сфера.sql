@@ -476,6 +476,39 @@ object_occurrence_summary as (
 )
 
 select
+    /*
+    Первые колонки расположены для удобного просмотра:
+    сначала договор, затем объект этого договора.
+    */
+    object_row.contract_id,
+    object_row.n_contract,
+    object_row.as_of_date,
+
+    count(*) over (
+        partition by object_row.contract_id
+    )
+        as objects_in_contract,
+
+    row_number() over (
+        partition by object_row.contract_id
+        order by object_row.insurance_object_id
+    )
+        as object_number_in_contract,
+
+    object_row.insurance_object_id,
+    object_row.object_description,
+    object_row.obj_name,
+    object_row.obj_type,
+    object_row.elementary_obj_type,
+
+    address.full_address
+        as normalized_address,
+    object_row.original_address,
+    address.fias_code,
+
+    /*
+    Далее идут технические ключи, контекст и все доступные признаки.
+    */
     concat_ws(
         ':',
         object_row.task_id::text,
@@ -487,22 +520,18 @@ select
         as source_system,
     current_timestamp
         as extracted_at,
-    object_row.as_of_date,
 
     object_row.task_object_link_id,
-    object_row.insurance_object_id,
     object_row.characteristics_id,
     object_row.geo_address_id,
     object_row.task_id,
     object_row.request_id,
-    object_row.contract_id,
     object_row.contractor_id,
 
     occurrence.contracts_for_object_in_selected_slice,
     object_row.candidate_task_count,
     object_row.object_link_count_in_selected_task,
 
-    object_row.n_contract,
     object_row.n_contract_cleaned,
     object_row.rootcontract_id,
     object_row.prevcontract_id,
@@ -558,16 +587,9 @@ select
     object_row.task_industry,
     object_row.task_subindustry,
 
-    object_row.obj_name,
-    object_row.object_description,
-    object_row.obj_type,
-    object_row.elementary_obj_type,
     object_row.object_group_id,
     object_row.object_record_active,
 
-    object_row.original_address,
-    address.full_address
-        as normalized_address,
     address.postal_code,
     address.region_id
         as address_region_id,
@@ -582,7 +604,6 @@ select
     address.block,
     address.flat,
     address.office,
-    address.fias_code,
     address.longitude,
     address.latitude,
     address.address_dgis_id,
