@@ -87,6 +87,12 @@ as "Подходящих_договоров_с_недвижимостью",
 round(
 100.0 * (select count(*) from eligible_contracts)
 / nullif((select count(*) from all_contracts), 0),
-1
+6
 )
-as "Доля_подходящих_процентов";
+as "Доля_от_всех_записей_процентов",
+round(
+100.0 * (select count(*) from eligible_contracts)
+/ nullif((select count(distinct contract_id) from task_candidates), 0),
+2
+)
+as "Доля_среди_договоров_с_подходящей_задачей_процентов";
