@@ -104,25 +104,70 @@ oracle_rows as (
 select
 contract_id,
 'select '
-|| quote_nullable(contract_id::text)
+|| chr(39) || contract_id::text || chr(39)
 || ' as sphere_contract_id, '
-|| quote_nullable(nullif(btrim(contract_sbs_id), ''))
+|| case
+when nullif(btrim(contract_sbs_id), '') is null then 'null'
+else chr(39)
+|| replace(btrim(contract_sbs_id), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as contract_sbs_id, '
-|| quote_nullable(nullif(btrim(core_id), ''))
+|| case
+when nullif(btrim(core_id), '') is null then 'null'
+else chr(39)
+|| replace(btrim(core_id), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as core_id, '
-|| quote_nullable(nullif(btrim(n_contract), ''))
+|| case
+when nullif(btrim(n_contract), '') is null then 'null'
+else chr(39)
+|| replace(btrim(n_contract), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as contract_number, '
-|| quote_nullable(nullif(btrim(n_contract_cleaned), ''))
+|| case
+when nullif(btrim(n_contract_cleaned), '') is null then 'null'
+else chr(39)
+|| replace(btrim(n_contract_cleaned), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as contract_number_cleaned, '
-|| quote_nullable(nullif(btrim(task_policy_number), ''))
+|| case
+when nullif(btrim(task_policy_number), '') is null then 'null'
+else chr(39)
+|| replace(btrim(task_policy_number), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as task_policy_number, '
-|| quote_nullable(nullif(btrim(task_policy_number_1c), ''))
+|| case
+when nullif(btrim(task_policy_number_1c), '') is null then 'null'
+else chr(39)
+|| replace(btrim(task_policy_number_1c), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as task_policy_number_1c, '
-|| quote_nullable(nullif(btrim(request_policy_number), ''))
+|| case
+when nullif(btrim(request_policy_number), '') is null then 'null'
+else chr(39)
+|| replace(btrim(request_policy_number), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as request_policy_number, '
-|| quote_nullable(nullif(btrim(contract_contractor_sbs_id), ''))
+|| case
+when nullif(btrim(contract_contractor_sbs_id), '') is null then 'null'
+else chr(39)
+|| replace(btrim(contract_contractor_sbs_id), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as contract_contractor_sbs_id, '
-|| quote_nullable(nullif(btrim(policyholder_sbs_id), ''))
+|| case
+when nullif(btrim(policyholder_sbs_id), '') is null then 'null'
+else chr(39)
+|| replace(btrim(policyholder_sbs_id), chr(39), chr(39) || chr(39))
+|| chr(39)
+end
 || ' as policyholder_sbs_id from dual'
 as oracle_row
 from test_population
@@ -179,187 +224,57 @@ union
 select sphere_contract_id, trim(policyholder_sbs_id)
 from sphere_contracts
 where policyholder_sbs_id is not null
-),
-hypotheses as (
+)
 select
-1 as hypothesis_number,
-'bps_contract.sbs_id = CONTRACTS.CONTRACT_ID' as hypothesis,
+(select count(distinct sphere_contract_id) from sphere_contracts)
+as total_contracts,
 (select count(distinct sphere_contract_id)
 from sphere_contracts
-where contract_sbs_id is not null) as available_sphere_contracts,
-count(distinct s.sphere_contract_id) as matched_sphere_contracts,
-count(distinct k.contract_id) as matched_khd_values
+where contract_sbs_id is not null) as h1_keys,
+(select count(distinct s.sphere_contract_id)
 from sphere_contracts s
 join dm_risk_avatar.contracts k
-on trim(k.contract_id) = trim(s.contract_sbs_id)
-
-union all
-
-select
-2,
-'bps_contract.core_id = CONTRACTS.CONTRACT_ID',
+on trim(k.contract_id) = trim(s.contract_sbs_id)) as h1_match,
 (select count(distinct sphere_contract_id)
 from sphere_contracts
-where core_id is not null),
-count(distinct s.sphere_contract_id),
-count(distinct k.contract_id)
+where core_id is not null) as h2_keys,
+(select count(distinct s.sphere_contract_id)
 from sphere_contracts s
 join dm_risk_avatar.contracts k
-on trim(k.contract_id) = trim(s.core_id)
-
-union all
-
-select
-3,
-'bps_contract number = CONTRACTS.CONTRACT_NUM exact',
+on trim(k.contract_id) = trim(s.core_id)) as h2_match,
 (select count(distinct sphere_contract_id)
 from raw_contract_numbers
-where key_value is not null),
-count(distinct n.sphere_contract_id),
-count(distinct k.contract_id)
+where key_value is not null) as h3_keys,
+(select count(distinct n.sphere_contract_id)
 from raw_contract_numbers n
 join dm_risk_avatar.contracts k
 on upper(trim(k.contract_num)) = n.key_value
-where n.key_value is not null
-
-union all
-
-select
-4,
-'task or request policy number = CONTRACTS.CONTRACT_NUM exact',
+where n.key_value is not null) as h3_match,
 (select count(distinct sphere_contract_id)
 from raw_task_numbers
-where key_value is not null),
-count(distinct n.sphere_contract_id),
-count(distinct k.contract_id)
+where key_value is not null) as h4_keys,
+(select count(distinct n.sphere_contract_id)
 from raw_task_numbers n
 join dm_risk_avatar.contracts k
 on upper(trim(k.contract_num)) = n.key_value
-where n.key_value is not null
-
-union all
-
-select
-5,
-'all policy numbers = CONTRACTS.CONTRACT_NUM normalized',
+where n.key_value is not null) as h4_match,
 (select count(distinct sphere_contract_id)
-from normalized_number_keys),
-count(distinct n.sphere_contract_id),
-count(distinct k.contract_id)
+from normalized_number_keys) as h5_keys,
+(select count(distinct n.sphere_contract_id)
 from normalized_number_keys n
 join dm_risk_avatar.contracts k
 on regexp_replace(
 upper(trim(k.contract_num)),
 '[^[:alnum:]]',
 ''
-) = n.key_value
-
-union all
-
-select
-6,
-'contractor SBS ID = CONTRACTS.CLIENT_ID client level only',
+) = n.key_value) as h5_match,
 (select count(distinct sphere_contract_id)
-from client_keys),
-count(distinct c.sphere_contract_id),
-count(distinct k.client_id)
+from client_keys) as h6_keys,
+(select count(distinct c.sphere_contract_id)
 from client_keys c
 join dm_risk_avatar.contracts k
-on trim(k.client_id) = c.key_value
-
-union all
-
-select
-7,
-'bps_contract.sbs_id = STG_CLIENT_CONTRACT.CONTRACT_ID',
-(select count(distinct sphere_contract_id)
-from sphere_contracts
-where contract_sbs_id is not null),
-count(distinct s.sphere_contract_id),
-count(distinct k.contract_id)
-from sphere_contracts s
-join dm_risk_avatar.stg_client_contract k
-on trim(k.contract_id) = trim(s.contract_sbs_id)
-
-union all
-
-select
-8,
-'bps_contract.core_id = STG_CLIENT_CONTRACT.DOCUMENT_ID',
-(select count(distinct sphere_contract_id)
-from sphere_contracts
-where core_id is not null),
-count(distinct s.sphere_contract_id),
-count(distinct k.document_id)
-from sphere_contracts s
-join dm_risk_avatar.stg_client_contract k
-on trim(k.document_id) = trim(s.core_id)
-
-union all
-
-select
-9,
-'bps_contract.sbs_id = STG_ADDRESS_ZUD.CONTRACT_ID',
-(select count(distinct sphere_contract_id)
-from sphere_contracts
-where contract_sbs_id is not null),
-count(distinct s.sphere_contract_id),
-count(distinct k.contract_id)
-from sphere_contracts s
-join dm_risk_avatar.stg_address_zud k
-on trim(k.contract_id) = trim(s.contract_sbs_id)
-
-union all
-
-select
-10,
-'bps_contract.sbs_id = STG_CONTRACT_OBJRISK.CONTRACT_ID',
-(select count(distinct sphere_contract_id)
-from sphere_contracts
-where contract_sbs_id is not null),
-count(distinct s.sphere_contract_id),
-count(distinct k.contract_id)
-from sphere_contracts s
-join dm_risk_avatar.stg_contract_objrisk k
-on trim(k.contract_id) = trim(s.contract_sbs_id)
-
-union all
-
-select
-11,
-'all policy numbers = STG_CONTRACT_OBJRISK.CONTRACT_NUM normalized',
-(select count(distinct sphere_contract_id)
-from normalized_number_keys),
-count(distinct n.sphere_contract_id),
-count(distinct k.contract_id)
-from normalized_number_keys n
-join dm_risk_avatar.stg_contract_objrisk k
-on regexp_replace(
-upper(trim(k.contract_num)),
-'[^[:alnum:]]',
-''
-) = n.key_value
-)
-select
-hypothesis_number as "Номер гипотезы",
-hypothesis as "Что проверили",
-(select count(distinct sphere_contract_id) from sphere_contracts)
-as "Всего договоров Сферы",
-available_sphere_contracts as "Договоров с заполненным ключом",
-matched_sphere_contracts as "Договоров Сферы найдено",
-matched_khd_values as "Значений найдено в КХД",
-round(
-100 * matched_sphere_contracts /
-nullif((select count(distinct sphere_contract_id) from sphere_contracts), 0),
-1
-) as "Найдено от всех процентов",
-round(
-100 * matched_sphere_contracts /
-nullif(available_sphere_contracts, 0),
-1
-) as "Найдено среди заполненных процентов"
-from hypotheses
-order by hypothesis_number
+on trim(k.client_id) = c.key_value) as h6_match
+from dual
 $oracle$
 as "Готовый Oracle запрос"
 from oracle_rows;
