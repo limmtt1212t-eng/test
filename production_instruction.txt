@@ -4,20 +4,20 @@
 
 Передаю файлы для расчёта агрегированных TAG:
 
-- config.py
 - fit_and_save_agg_scalers.ipynb
 - prod_agg_transform.ipynb
 - aggregated_tags_pipeline.pkl
+- config.py
 
 fit_and_save_agg_scalers.ipynb нужен для подготовки артефакта. Он рассчитывает сырые скоры, настраивает MinMaxScaler для каждой группы и сохраняет параметры в aggregated_tags_pipeline.pkl. Также он сохраняет рассчитанные признаки в CSV.
 
-Этот ноутбук уже был запущен на исходном датасете. Для новых котировок повторно запускать его не нужно.
+Этот ноутбук уже был запущен на исходном датасете. Для новых котировок повторно запускать его не нужно. Config.py нужен только для повторной подготовки pkl.
 
 prod_agg_transform.ipynb используется для новых данных. Он загружает готовый pkl, проверяет наличие обязательных TAG, рассчитывает сырые скоры и применяет сохранённые MinMaxScaler.
 
-Перед production-запуском нужно указать в config.py путь к новым данным:
+Перед production-запуском нужно указать путь к новым данным в ячейке «Новые данные» файла prod_agg_transform.ipynb:
 
-DATA_CSV_PART1 = "путь_к_файлу"
+DATA_CSV_PATH = r"путь_к_файлу"
 
 Файл pkl по умолчанию должен лежать здесь:
 
@@ -25,7 +25,7 @@ artifacts/model/aggregated_tags_pipeline.pkl
 
 Если файл лежит в другом месте, нужно изменить MODEL_PATH в production-ноутбуке.
 
-Для новых котировок нужно запускать только prod_agg_transform.ipynb. Все ячейки выполняются по порядку.
+Для новых котировок нужны только prod_agg_transform.ipynb и aggregated_tags_pipeline.pkl. Config.py для production-расчёта не используется. Все ячейки выполняются по порядку.
 
 На выходе получается DataFrame result с тремя признаками:
 
