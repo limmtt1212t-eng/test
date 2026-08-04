@@ -5,6 +5,10 @@
 Сначала он создаёт Oracle-запрос, который проверит разные способы
 связать наши договоры "Сферы" с договорами КХД.
 
+Для технической проверки берутся 30 договоров с наиболее заполненными
+ключами. Это сделано, чтобы DBeaver не обрезал длинный текст. Когда рабочая
+связь будет найдена, покрытие будет отдельно посчитано на всех договорах.
+
 Порядок:
 1. Выполнить весь этот файл в "Сфере".
 2. Скопировать содержимое единственной ячейки "Готовый Oracle запрос".
@@ -73,6 +77,29 @@ and obj.elementary_obj_type = 'nedv_ul_and_ip'
 and obj.d_delete is null
 )
 ),
+test_population as (
+select *
+from population
+where contract_sbs_id is not null
+or core_id is not null
+or n_contract is not null
+or n_contract_cleaned is not null
+or task_policy_number is not null
+or task_policy_number_1c is not null
+or request_policy_number is not null
+order by
+(
+case when contract_sbs_id is not null then 1 else 0 end
++ case when core_id is not null then 1 else 0 end
++ case when n_contract is not null then 1 else 0 end
++ case when n_contract_cleaned is not null then 1 else 0 end
++ case when task_policy_number is not null then 1 else 0 end
++ case when task_policy_number_1c is not null then 1 else 0 end
++ case when request_policy_number is not null then 1 else 0 end
+) desc,
+contract_id desc
+limit 30
+),
 oracle_rows as (
 select
 contract_id,
@@ -98,7 +125,7 @@ contract_id,
 || quote_nullable(nullif(btrim(policyholder_sbs_id), ''))
 || ' as policyholder_sbs_id from dual'
 as oracle_row
-from population
+from test_population
 )
 select
 $oracle$
