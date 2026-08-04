@@ -1,7 +1,7 @@
 /*
 ЗАПУСКАТЬ В ПОДКЛЮЧЕНИИ К БАЗЕ "СФЕРА".
 
-В файле три независимых запроса.
+В файле четыре независимых запроса.
 Запускать по одному: от WITH до ближайшей точки с запятой.
 
 Запрос 1 возвращает только агрегаты и показывает, какими ключами можно
@@ -12,11 +12,15 @@
 
 Запрос 3 возвращает по одной строке на объект недвижимости в выбранной
 задаче договора. Ожидаемый порядок величины — 1051 строка.
+
+Запрос 4 создаёт готовый Oracle-запрос только для наших подходящих
+договоров. Результатом будет одна длинная ячейка с SQL-кодом. Её нужно
+скопировать в редактор подключения КХД 1.0 и выполнить там.
 */
 
 
 /* ======================================================================
-ЗАПРОС 1 ИЗ 3. ЗАПОЛНЕННОСТЬ КЛЮЧЕЙ ДЛЯ СВЯЗИ С КХД
+ЗАПРОС 1 ИЗ 4. ЗАПОЛНЕННОСТЬ КЛЮЧЕЙ ДЛЯ СВЯЗИ С КХД
 ====================================================================== */
 
 with task_candidates as (
@@ -124,7 +128,7 @@ from population;
 
 
 /* ======================================================================
-ЗАПРОС 2 ИЗ 3. ОДНА СТРОКА НА ДОГОВОР ДЛЯ СВЕРКИ С КХД
+ЗАПРОС 2 ИЗ 4. ОДНА СТРОКА НА ДОГОВОР ДЛЯ СВЕРКИ С КХД
 
 Сначала попробуйте связать:
 Сфера.sbs_id = КХД.CONTRACTS.CONTRACT_ID.
@@ -220,7 +224,7 @@ task.contract_id;
 
 
 /* ======================================================================
-ЗАПРОС 3 ИЗ 3. ОДНА СТРОКА НА ОБЪЕКТ НЕДВИЖИМОСТИ
+ЗАПРОС 3 ИЗ 4. ОДНА СТРОКА НА ОБЪЕКТ НЕДВИЖИМОСТИ
 
 Эта выгрузка понадобится после того, как договорная связь с КХД будет
 подтверждена. Адрес и характеристики используются для контроля совпадения.
@@ -347,3 +351,174 @@ d_start_contract desc nulls last,
 contract_id,
 object_id;
 
+
+/* ======================================================================
+ЗАПРОС 4 ИЗ 4. СОЗДАТЬ ORACLE-ЗАПРОС ДЛЯ НАШИХ ДОГОВОРОВ
+
+Что сделать:
+1. Выполнить этот запрос в "Сфере".
+2. В результате получится одна ячейка "Готовый Oracle запрос".
+3. Скопировать содержимое этой ячейки целиком.
+4. Вставить в редактор подключения КХД 1.0 и выполнить.
+
+Договорные идентификаторы останутся только на рабочем компьютере.
+====================================================================== */
+
+with task_candidates as (
+select
+c.id as contract_id,
+c.n_contract,
+c.n_contract_cleaned,
+c.sbs_id,
+t.id as task_id,
+row_number() over (
+partition by c.id
+order by
+t.d_conclusion_ins_contract desc nulls last,
+t.d_create desc nulls last,
+t.d_change desc nulls last,
+t.id desc
+) as task_rank
+from bps_request_ins_task t
+join bps_request_ins r
+on r.id = t.request_ins_id
+join bps_contract c
+on c.id = r.contract_id
+where t.task_type = 'draft_contract'
+and t.status = 'operational_archive'
+and (
+t.ins_document_type = 'new_ins_contract'
+or t.ins_document_type = 'ins_contract_prolong'
+or t.ins_document_type is null
+)
+and t.ins_refuse is not true
+and t.d_delete is null
+and r.d_delete is null
+and c.d_delete is null
+),
+selected_tasks as (
+select *
+from task_candidates
+where task_rank = 1
+),
+population as (
+select task.*
+from selected_tasks task
+where exists (
+select 1
+from bps_request_ins_task_insurance_object tobj
+join base_insurance_object_characteristics ch
+on ch.id = tobj.characteristics_id
+join base_insurance_object obj
+on obj.id = ch.insurance_object_id
+where tobj.parent_id = task.task_id
+and obj.elementary_obj_type = 'nedv_ul_and_ip'
+and obj.d_delete is null
+)
+),
+oracle_rows as (
+select
+contract_id,
+'select '
+|| quote_nullable(contract_id::text)
+|| ' as sphere_contract_id, '
+|| quote_nullable(nullif(btrim(sbs_id), ''))
+|| ' as sphere_sbs_id, '
+|| quote_nullable(nullif(btrim(n_contract), ''))
+|| ' as sphere_policy_number, '
+|| quote_nullable(nullif(btrim(n_contract_cleaned), ''))
+|| ' as sphere_policy_number_cleaned from dual'
+as oracle_row
+from population
+)
+select
+$oracle$
+with sphere_contracts as (
+$oracle$
+|| string_agg(
+oracle_row,
+E'\nunion all\n'
+order by contract_id
+)
+|| $oracle$
+),
+contract_matches as (
+select
+s.sphere_contract_id,
+s.sphere_sbs_id,
+s.sphere_policy_number,
+s.sphere_policy_number_cleaned,
+d.policy_id as khd_policy_id,
+d.policy_number as khd_policy_number,
+d.product_group as khd_product_group,
+d.object_type as khd_object_type,
+d.cadaster as khd_cadaster,
+case
+when s.sphere_sbs_id is not null
+and trim(d.policy_id) = trim(s.sphere_sbs_id)
+then 1 else 0
+end as matched_by_id,
+case
+when (
+s.sphere_policy_number is not null
+and upper(trim(d.policy_number)) = upper(trim(s.sphere_policy_number))
+)
+or (
+s.sphere_policy_number_cleaned is not null
+and upper(trim(d.policy_number)) =
+upper(trim(s.sphere_policy_number_cleaned))
+)
+then 1 else 0
+end as matched_by_number
+from sphere_contracts s
+left join dm_risk_avatar.dict_ins_potential_object_address_extra d
+on (
+s.sphere_sbs_id is not null
+and trim(d.policy_id) = trim(s.sphere_sbs_id)
+)
+or (
+s.sphere_policy_number is not null
+and upper(trim(d.policy_number)) = upper(trim(s.sphere_policy_number))
+)
+or (
+s.sphere_policy_number_cleaned is not null
+and upper(trim(d.policy_number)) =
+upper(trim(s.sphere_policy_number_cleaned))
+)
+)
+select
+count(distinct m.sphere_contract_id)
+as "Договоров Сферы в проверке",
+count(distinct case
+when m.matched_by_id = 1 then m.sphere_contract_id
+end) as "Найдено по ID договора",
+count(distinct case
+when m.matched_by_number = 1 then m.sphere_contract_id
+end) as "Найдено по номеру договора",
+count(distinct case
+when m.matched_by_id = 1 or m.matched_by_number = 1
+then m.sphere_contract_id
+end) as "Договоров найдено в DICT",
+count(distinct case
+when trim(m.khd_cadaster) is not null then m.sphere_contract_id
+end) as "Договоров с кадастровым номером",
+count(distinct case
+when e.cadaster is not null then m.sphere_contract_id
+end) as "Договоров найдено в EGRN_DATA",
+count(distinct case
+when trim(m.khd_cadaster) is not null then m.khd_cadaster
+end) as "Кадастровых номеров из DICT",
+count(distinct e.cadaster)
+as "Кадастровых номеров найдено в EGRN_DATA",
+round(
+100 * count(distinct case
+when e.cadaster is not null then m.sphere_contract_id
+end) / nullif(count(distinct m.sphere_contract_id), 0),
+1
+) as "Доля договоров с найденным ЕГРН процентов"
+from contract_matches m
+left join dm_risk_avatar.egrn_data e
+on trim(e.cadaster) = trim(m.khd_cadaster)
+$oracle$
+as "Готовый Oracle запрос"
+from oracle_rows;
