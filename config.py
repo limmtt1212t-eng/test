@@ -6,8 +6,7 @@
 # ── Пути к данным ──────────────────────────────────────────────────────────────
 
 TAGS_EXCEL_PATH = r"T:\Блок актуарных расчетов\Управление актуарных расчетов\Общая\ХакимовAT\CASCO\TAGS\03_EMB\HT_NSI_Analysis(AutoRecovered) (2).xlsx"
-DATA_CSV_PART1 = r"T:\Блок актуарных расчетов\Управление актуарных расчетов\Общая\ХакимовAT\CASCO\TAGS\03_EMB\CASCO_GLM_W_MKT_2025_05_HASHTAGS_PART_1.csv"
-DATA_CSV_PART2 = r"T:\Блок актуарных расчетов\Управление актуарных расчетов\Общая\ХакимовAT\CASCO\TAGS\03_EMB\CASCO_GLM_W_MKT_2025_05_HASHTAGS_PART_2.csv"
+DATA_CSV_PART1 = r"T:\Блок актуарных расчетов\Управление актуарных расчетов\Общая\Светова\casco\clustering\q2_05\casco_contracts_tags_weight_2026_05_15.csv"
 
 TARGET_COL = 'BINARY_CLAIMS_PART_DAM_COUNT'
 
