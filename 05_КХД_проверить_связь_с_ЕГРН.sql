@@ -2,14 +2,125 @@
 ЗАПУСКАТЬ В ПОДКЛЮЧЕНИИ К КХД 1.0.
 
 Синтаксис рассчитан на Oracle.
-В файле пять независимых запросов. Запускать по одному.
+В начале находятся диагностические запросы A-C для ошибки ORA-00942.
+После них находятся пять основных независимых запросов. Запускать по одному.
 
-Если появится ORA-00942, значит таблицы доступны через другую схему.
-Тогда добавьте имя схемы, например:
-DM_RISK_AVATAR.CONTRACTS
+ВАЖНАЯ ПОПРАВКА ПО EXCEL-ФАЙЛУ "колонки_таблиц.xlsx":
+
+1. В Excel нет отдельного столбца OWNER или SCHEMA. Есть только:
+   TABLE_NAME, TABLE_COMMENTS, COLUMN_ID, COLUMN_NAME, DATA_TYPE,
+   NULLABLE, COLUMN_COMMENTS.
+2. В описании STG_ADDRESS_ZUD и STG_SPRAVOCHNIK_ZUD_OBJADDRESS явно
+   упомянута схема DM_RISK_AVATAR.
+3. Excel не содержит точного распределения остальных таблиц между
+   DM_RISK_AVATAR и возможной схемой DM_RISK_AVATAR_PDN.
+
+Поэтому после ORA-00942 сначала выполните только ДИАГНОСТИКУ A.
+Она не читает страховые данные: она показывает полные имена доступных
+таблиц в формате СХЕМА.ТАБЛИЦА.
+
+Основные запросы 1-5 пока не запускать: их имена таблиц нужно дополнить
+схемами по результату ДИАГНОСТИКИ A.
 
 Не переходите к запросу 5, пока запросы 1-4 не подтвердят правильную связь.
 */
+
+
+/* ======================================================================
+ДИАГНОСТИКА A. НАЙТИ ВЛАДЕЛЬЦА ДОСТУПНЫХ ТАБЛИЦ ИЛИ ПРЕДСТАВЛЕНИЙ
+
+Если таблица найдена, используйте полное имя OWNER.OBJECT_NAME, например:
+НАЙДЕННЫЙ_OWNER.CONTRACTS.
+====================================================================== */
+
+select
+owner as "Схема владелец",
+object_name as "Имя объекта",
+object_type as "Тип объекта",
+status as "Статус",
+owner || '.' || object_name as "Полное имя"
+from all_objects
+where object_name in (
+'CONTRACTS',
+'LEGAL_CLIENTS',
+'LNK_CLIENT_OBJECT_CONTRACT',
+'ESTATE_OBJECTS',
+'EGRN_DATA',
+'BUILDINGS',
+'DICT_INS_POTENTIAL_OBJECT_ADDRESS_EXTRA',
+'STG_ADDRESS_ZUD',
+'STG_SPRAVOCHNIK_ZUD_OBJADDRESS'
+)
+and object_type in (
+'TABLE',
+'VIEW',
+'MATERIALIZED VIEW'
+)
+order by
+object_name,
+owner;
+
+
+/* ======================================================================
+ДИАГНОСТИКА B. НАЙТИ ДОСТУПНЫЕ СИНОНИМЫ
+
+Если SYNONYM_NAME совпадает с нужным именем, в запросе можно использовать
+синоним без префикса схемы.
+====================================================================== */
+
+select
+owner as "Владелец синонима",
+synonym_name as "Синоним",
+table_owner as "Схема исходного объекта",
+table_name as "Исходный объект",
+db_link as "DB link"
+from all_synonyms
+where synonym_name in (
+'CONTRACTS',
+'LEGAL_CLIENTS',
+'LNK_CLIENT_OBJECT_CONTRACT',
+'ESTATE_OBJECTS',
+'EGRN_DATA',
+'DICT_INS_POTENTIAL_OBJECT_ADDRESS_EXTRA'
+)
+order by
+synonym_name,
+owner;
+
+
+/* ======================================================================
+ДИАГНОСТИКА C. НАЙТИ ПОХОЖИЕ ДОСТУПНЫЕ ТАБЛИЦЫ ПО КОЛОНКАМ
+
+Нужна, если запросы A и B ничего не нашли: реальные имена таблиц могут
+отличаться от имён в Excel.
+====================================================================== */
+
+select
+owner as "Схема владелец",
+table_name as "Имя таблицы",
+count(distinct column_name) as "Совпавших ключевых колонок",
+listagg(column_name, ', ')
+within group (order by column_name) as "Найденные колонки"
+from all_tab_columns
+where column_name in (
+'CONTRACT_ID',
+'CONTRACT_NUM',
+'CLIENT_ID',
+'INN',
+'OBJECT_ID',
+'OBJECT_CATEGORY',
+'CAD_IND',
+'CADASTER',
+'EGRN_ADDRESS'
+)
+group by
+owner,
+table_name
+having count(distinct column_name) >= 3
+order by
+"Совпавших ключевых колонок" desc,
+owner,
+table_name;
 
 
 /* ======================================================================
