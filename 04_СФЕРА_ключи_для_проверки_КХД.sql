@@ -469,9 +469,44 @@ and upper(trim(d.policy_number)) =
 upper(trim(s.sphere_policy_number_cleaned))
 )
 then 1 else 0
-end as matched_by_number
+end as matched_by_number,
+case
+when d.policy_number_normalized is not null
+and (
+(
+s.sphere_policy_number is not null
+and d.policy_number_normalized = regexp_replace(
+upper(trim(s.sphere_policy_number)),
+'[^[:alnum:]]',
+''
+)
+)
+or (
+s.sphere_policy_number_cleaned is not null
+and d.policy_number_normalized = regexp_replace(
+upper(trim(s.sphere_policy_number_cleaned)),
+'[^[:alnum:]]',
+''
+)
+)
+)
+then 1 else 0
+end as matched_by_normalized_number
 from sphere_contracts s
-left join dm_risk_avatar.dict_ins_potential_object_address_extra d
+left join (
+select
+policy_id,
+policy_number,
+product_group,
+object_type,
+cadaster,
+regexp_replace(
+upper(trim(policy_number)),
+'[^[:alnum:]]',
+''
+) as policy_number_normalized
+from dm_risk_avatar.dict_ins_potential_object_address_extra
+) d
 on (
 s.sphere_sbs_id is not null
 and trim(d.policy_id) = trim(s.sphere_sbs_id)
@@ -485,6 +520,24 @@ s.sphere_policy_number_cleaned is not null
 and upper(trim(d.policy_number)) =
 upper(trim(s.sphere_policy_number_cleaned))
 )
+or (
+d.policy_number_normalized is not null
+and s.sphere_policy_number is not null
+and d.policy_number_normalized = regexp_replace(
+upper(trim(s.sphere_policy_number)),
+'[^[:alnum:]]',
+''
+)
+)
+or (
+d.policy_number_normalized is not null
+and s.sphere_policy_number_cleaned is not null
+and d.policy_number_normalized = regexp_replace(
+upper(trim(s.sphere_policy_number_cleaned)),
+'[^[:alnum:]]',
+''
+)
+)
 )
 select
 count(distinct m.sphere_contract_id)
@@ -496,7 +549,12 @@ count(distinct case
 when m.matched_by_number = 1 then m.sphere_contract_id
 end) as "Найдено по номеру договора",
 count(distinct case
-when m.matched_by_id = 1 or m.matched_by_number = 1
+when m.matched_by_normalized_number = 1 then m.sphere_contract_id
+end) as "Найдено по очищенному номеру",
+count(distinct case
+when m.matched_by_id = 1
+or m.matched_by_number = 1
+or m.matched_by_normalized_number = 1
 then m.sphere_contract_id
 end) as "Договоров найдено в DICT",
 count(distinct case
