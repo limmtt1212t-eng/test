@@ -340,18 +340,18 @@ replace(regexp_replace(replace(lower(trim(e.house_number)), 'ё', 'е'), '[[:spa
 replace(regexp_replace(replace(lower(trim(e.korpus)), 'ё', 'е'), '[[:space:]]+', ' '), ' ', '') as egrn_korpus,
 replace(regexp_replace(replace(lower(trim(e.stroenie)), 'ё', 'е'), '[[:space:]]+', ' '), ' ', '') as egrn_stroenie
 from dm_risk_avatar.egrn_data e
-where e.house_number in ($q$
+where replace(upper(trim(e.house_number)), 'Ё', 'Е') in ($q$
 || oracle_house_filter.house_list
 || $q$)
 and (
-e.city in ($q$
+replace(upper(trim(e.city)), 'Ё', 'Е') in ($q$
 || oracle_locality_filter.locality_list
 || $q$)
-or e.settlement in ($q$
+or replace(upper(trim(e.settlement)), 'Ё', 'Е') in ($q$
 || oracle_locality_filter.locality_list
 || $q$)
 )
-and e.street in ($q$
+and replace(upper(trim(e.street)), 'Ё', 'Е') in ($q$
 || oracle_street_filter.street_list
 || $q$)
 ),
