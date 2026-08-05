@@ -232,6 +232,18 @@ nullif(btrim(settlement), ''),
 (regexp_match(address_lower, '(?:^|, )(?:пгт|поселок городского типа|рп|рабочий поселок|пос|поселок|с|село|д|деревня) ([^,]+)(?:,|$)'))[1]
 ) as parsed_settlement,
 
+/*
+Если в адресе нет типа населенного пункта, берём сегмент перед улицей.
+Например: "разумное, березовая улица, 25" -> "разумное".
+Позже это поле сравнивается и с BUILDINGS.CITY, и с BUILDINGS.SETTLEMENT.
+*/
+coalesce(
+(regexp_match(address_lower, '(?:^|, )(?:г|город) ([^,]+)(?:,|$)'))[1],
+nullif(btrim(settlement), ''),
+(regexp_match(address_lower, '(?:^|, )(?:пгт|поселок городского типа|рп|рабочий поселок|пос|поселок|с|село|д|деревня) ([^,]+)(?:,|$)'))[1],
+(regexp_match(address_lower, '(?:^|, )([^,]+), (?:[^,]+ (?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|наб|набережная|б-р|бульвар|проезд|пл|площадь|тракт|аллея)|(?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|наб|набережная|б-р|бульвар|проезд|пл|площадь|тракт|аллея) [^,]+)(?:,|$)'))[1]
+) as parsed_locality,
+
 coalesce(
 nullif(btrim(street_type), ''),
 case
@@ -245,18 +257,30 @@ when address_lower ~ '(?:^|, )проезд ' then 'проезд'
 when address_lower ~ '(?:^|, )(?:пл|площадь) ' then 'пл'
 when address_lower ~ '(?:^|, )тракт ' then 'тракт'
 when address_lower ~ '(?:^|, )аллея ' then 'аллея'
+when address_lower ~ '(?:^|, )[^,]+ (?:ул|улица)(?:,|$)' then 'ул'
+when address_lower ~ '(?:^|, )[^,]+ (?:пр-кт|проспект)(?:,|$)' then 'пр-кт'
+when address_lower ~ '(?:^|, )[^,]+ (?:пер|переулок)(?:,|$)' then 'пер'
+when address_lower ~ '(?:^|, )[^,]+ (?:ш|шоссе)(?:,|$)' then 'ш'
+when address_lower ~ '(?:^|, )[^,]+ (?:наб|набережная)(?:,|$)' then 'наб'
+when address_lower ~ '(?:^|, )[^,]+ (?:б-р|бульвар)(?:,|$)' then 'б-р'
+when address_lower ~ '(?:^|, )[^,]+ проезд(?:,|$)' then 'проезд'
+when address_lower ~ '(?:^|, )[^,]+ (?:пл|площадь)(?:,|$)' then 'пл'
+when address_lower ~ '(?:^|, )[^,]+ тракт(?:,|$)' then 'тракт'
+when address_lower ~ '(?:^|, )[^,]+ аллея(?:,|$)' then 'аллея'
 else null
 end
 ) as parsed_street_type,
 
 coalesce(
 nullif(btrim(street), ''),
-(regexp_match(address_lower, '(?:^|, )(?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|наб|набережная|б-р|бульвар|проезд|пл|площадь|тракт|аллея) ([^,]+)(?:,|$)'))[1]
+(regexp_match(address_lower, '(?:^|, )(?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|наб|набережная|б-р|бульвар|проезд|пл|площадь|тракт|аллея) ([^,]+)(?:,|$)'))[1],
+(regexp_match(address_lower, '(?:^|, )([^,]+?) (?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|наб|набережная|б-р|бульвар|проезд|пл|площадь|тракт|аллея)(?:,|$)'))[1]
 ) as parsed_street,
 
 coalesce(
 nullif(btrim(house), ''),
-(regexp_match(address_lower, '(?:^|, )(?:д|дом) *([0-9]+[а-яa-z]?(?:[/-][0-9а-яa-z]+)?)(?:,|$)'))[1]
+(regexp_match(address_lower, '(?:^|, )(?:д|дом) *([0-9]+[а-яa-z]?(?:[/-][0-9а-яa-z]+)?)(?:,|$)'))[1],
+(regexp_match(address_lower, '(?:^|, )([0-9]+[а-яa-z]?(?:[/-][0-9а-яa-z]+)?)$'))[1]
 ) as parsed_house_number,
 
 coalesce(
@@ -314,6 +338,7 @@ parsed_city_type as parsed_city_type,
 parsed_city as parsed_city,
 parsed_settlement_type as parsed_settlement_type,
 parsed_settlement as parsed_settlement,
+parsed_locality as parsed_locality,
 parsed_street_type as parsed_street_type,
 parsed_street as parsed_street,
 parsed_house_number as parsed_house_number,
@@ -362,7 +387,8 @@ when source_address is null then 'NO_ADDRESS'
 when parsed_street is not null
 and parsed_house_number is not null then 'STREET_AND_HOUSE'
 when parsed_city is not null
-or parsed_settlement is not null then 'LOCALITY_ONLY'
+or parsed_settlement is not null
+or parsed_locality is not null then 'LOCALITY_ONLY'
 else 'FULL_ADDRESS_ONLY'
 end as parsed_address_quality,
 
@@ -371,7 +397,21 @@ end as parsed_address_quality,
 from address_parsed
 )
 
-select *
+select
+count(*) over () as total_objects,
+count(*) filter (
+where parsed_address_quality = 'STREET_AND_HOUSE'
+) over () as objects_with_street_and_house,
+count(*) filter (
+where parsed_address_quality = 'LOCALITY_ONLY'
+) over () as objects_with_locality_only,
+count(*) filter (
+where parsed_address_quality = 'FULL_ADDRESS_ONLY'
+) over () as objects_with_full_address_only,
+count(*) filter (
+where parsed_address_quality = 'NO_ADDRESS'
+) over () as objects_without_address,
+result.*
 from result
 order by
 as_of_date desc nulls last,
