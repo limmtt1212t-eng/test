@@ -175,6 +175,21 @@ where insurance_object.elementary_obj_type = 'nedv_ul_and_ip'
 one_row_per_object as (
 select
     raw_object_rows.*,
+    nullif(
+        regexp_replace(
+            lower(
+                replace(
+                    replace(source_address, chr(160), ' '),
+                    'ё',
+                    'е'
+                )
+            ),
+            '[^0-9a-zа-я]+',
+            '',
+            'g'
+        ),
+        ''
+    ) as exact_address_match_key,
     case
         when replace(
             regexp_replace(area_raw, '[[:space:]]+', '', 'g'),
@@ -345,6 +360,20 @@ where match_locality is not null
   and match_house is not null
 ),
 
+exact_address_stats as (
+/*
+Здесь адрес не сокращается до дома: квартира, офис или
+помещение остаются в строке. Это позволяет отличить разные
+помещения внутри одного здания.
+*/
+select
+    exact_address_match_key,
+    count(distinct object_id) as exact_address_object_count
+from objects_prepared_for_egrn
+where exact_address_match_key is not null
+group by exact_address_match_key
+),
+
 address_stats as (
 select
     address_match_key,
@@ -358,6 +387,7 @@ select
         as contract_chain_count,
     count(distinct policyholder_id) as policyholder_count,
     count(distinct geo_address_id) as geo_address_id_count,
+    count(distinct exact_address_match_key) as exact_address_count,
     count(region_id) as rows_with_region_id,
     count(distinct region_id) as region_id_count,
     count(nullif(btrim(settlement_type), '')) as rows_with_settlement_type,
@@ -416,6 +446,8 @@ select
         as "Разных страхователей по адресу",
     duplicate.geo_address_id_count
         as "Разных ID записи адреса",
+    duplicate.exact_address_count
+        as "Разных точных адресов с квартирой/офисом",
     duplicate.rows_with_region_id
         as "Строк с ID региона",
     duplicate.region_id_count
@@ -508,6 +540,8 @@ select
     object_rows.address_source as "Откуда взят адрес",
     object_rows.address_for_egrn_search as "Адрес Сферы для поиска",
     object_rows.source_address as "Адрес-источник до разбора",
+    exact.exact_address_object_count
+        as "Разных ID объекта по этому точному адресу",
     object_rows.original_address as "Исходный адрес",
     object_rows.address_validation_code as "Код проверки адреса",
     object_rows.is_address_validated_by_user as "Адрес подтверждён пользователем",
@@ -551,6 +585,8 @@ select
 from ranked_addresses duplicate
 join objects_prepared_for_egrn object_rows
     on object_rows.address_match_key = duplicate.address_match_key
+left join exact_address_stats exact
+    on exact.exact_address_match_key = object_rows.exact_address_match_key
 order by
     duplicate.address_group_number,
     object_rows.policyholder_id,
