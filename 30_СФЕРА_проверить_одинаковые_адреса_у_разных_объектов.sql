@@ -30,10 +30,18 @@
 конкретную строку внутри этой группы.
 
 После понятных диагностических колонок выводятся все физические столбцы
-восьми исходных таблиц. Их заголовки переведены на русский. В начале
+восьми основных таблиц. Их заголовки переведены на русский. В начале
 каждого заголовка указан источник: «Задача», «Заявка», «Договор»,
 «Связь задачи и объекта», «Характеристики», «Объект», «Адрес»
 или «Страхователь».
+
+Все основные денежные показатели собраны одним блоком сразу после номера
+договора. Ниже по таблице они второй раз не повторяются.
+
+У одного объекта может быть несколько строк в таблице условий страхования.
+Чтобы из-за этого не размножать объекты, условия выводятся отдельно:
+количество вариантов, минимальная и максимальная суммы, валюты, лимиты
+и полный состав строк условий в одном JSON-массиве.
 
 Название источника нужно потому, что в разных таблицах повторяются поля
 «ID», «Статус», «Активность», «Дата создания» и «Дата изменения».
@@ -542,10 +550,61 @@ select
     object_rows.contract_id as "ID договора",
     object_rows.request_id as "ID заявки",
     object_rows.contract_number as "Номер договора",
+
+    /* Денежные показатели договора и объекта собраны рядом. */
     source_task."total_ins_contract_amount"
         as "Общая страховая сумма по договору",
+    source_task."curr_ins_contract_amount"
+        as "Валюта общей суммы договора",
     source_task."total_ins_contract_premium"
         as "Общая страховая премия договора",
+    source_task."total_ins_contract_rate"
+        as "Общий страховой тариф договора",
+    object_rows.insurance_value
+        as "Страховая стоимость объекта",
+    source_characteristics."insurance_value_currency"
+        as "Валюта стоимости объекта",
+    source_characteristics."insurance_value_basis"
+        as "Основание стоимости объекта",
+    object_rows.is_pledged
+        as "Признак залога",
+    source_characteristics."pledged_value"
+        as "Залоговая стоимость объекта",
+    object_rows.task_object_insured_sum
+        as "Сумма объекта из связи с задачей",
+    source_task_object."insured_sum_currency"
+        as "Валюта суммы из связи с задачей",
+    source_task_object."per_occurance_limit"
+        as "Лимит по случаю из связи с задачей",
+    source_conditions.condition_row_count
+        as "Кол-во условий объекта",
+    source_conditions.rows_with_insured_sum
+        as "Условий с суммой",
+    source_conditions.distinct_insured_sum_count
+        as "Разных сумм в условиях объекта",
+    source_conditions.minimum_insured_sum
+        as "Мин. сумма объекта из условий",
+    source_conditions.maximum_insured_sum
+        as "Макс. сумма объекта из условий",
+    source_conditions.insured_sum_currencies
+        as "Валюты сумм из условий",
+    source_conditions.minimum_per_occurrence_limit
+        as "Мин. лимит по случаю из условий",
+    source_conditions.maximum_per_occurrence_limit
+        as "Макс. лимит по случаю из условий",
+    case
+        when object_rows.task_object_insured_sum is not null
+         and source_conditions.rows_with_insured_sum > 0
+            then 'Сумма есть и в связи с задачей, и в условиях'
+        when object_rows.task_object_insured_sum is not null
+            then 'Сумма есть только в связи с задачей'
+        when source_conditions.rows_with_insured_sum > 0
+            then 'Сумма есть только в условиях страхования'
+        else 'Сумма объекта не найдена в двух источниках'
+    end as "Источник страховой суммы объекта",
+    source_conditions.all_condition_rows
+        as "Все варианты условий объекта JSON",
+
     object_rows.root_contract_id as "ID главного договора",
     object_rows.previous_contract_id as "ID предыдущего договора",
     object_rows.policyholder_id as "ID страхователя",
@@ -595,9 +654,6 @@ select
     object_rows.object_description as "Описание объекта",
     object_rows.area_raw as "Площадь как записана",
     object_rows.area_numeric as "Площадь числом",
-    object_rows.insurance_value as "Страховая стоимость",
-    object_rows.task_object_insured_sum as "Страховая сумма по объекту",
-    object_rows.is_pledged as "Признак залога",
     object_rows.insurance_territory as "Территория страхования",
     object_rows.insured_components as "Что застраховано",
     object_rows.activity_types as "Виды деятельности",
@@ -630,11 +686,7 @@ select
     source_insurance_object."author_id" as "Объект: ID автора",
     source_characteristics."id" as "Характеристики: ID набора характе…",
     source_characteristics."insurance_object_id" as "Характеристики: ID объекта страхо…",
-    source_characteristics."insurance_value_basis" as "Характеристики: Основание опред…",
-    source_characteristics."insurance_value_currency" as "Характеристики: Валюта страхово…",
     source_characteristics."characteristics" as "Характеристики: Характеристики…",
-    source_characteristics."insurance_value" as "Характеристики: Страховая стоим…",
-    source_characteristics."pledged_value" as "Характеристики: Залоговая стоим…",
     source_characteristics."version_number" as "Характеристики: Номер версии",
     source_characteristics."version_start_date" as "Характеристики: Дата начала рабо…",
     source_characteristics."version_end_date" as "Характеристики: Дата окончания р…",
@@ -948,16 +1000,12 @@ select
     source_task."ins_premium_pay_order" as "Задача: Порядок оплаты страховой…",
     source_task."contract_franchise_amount" as "Задача: Размер франшизы по догов…",
     source_task."contract_type_franchise" as "Задача: Тип франшизы по договору",
-    source_task."curr_ins_contract_amount" as "Задача: Валюта страховой суммы п…",
     source_task."ins_condition" as "Задача: Условия страхования",
     source_task."ins_contract_1_3" as "Задача: Пункт 1.3 Договора страхов…",
     source_task."ins_contract_1_4" as "Задача: Пункт 1.4 Договора страхов…",
     source_task."ins_product" as "Задача: Страховой продукт",
     source_task."parties_under_ins_contract" as "Задача: Стороны по договору стра…",
     source_task."property_subj_morgage" as "Задача: Имущество является предм…",
-    source_task."total_ins_contract_amount" as "Задача: Общая страховая сумма по…",
-    source_task."total_ins_contract_premium" as "Задача: Общая страховая премия п…",
-    source_task."total_ins_contract_rate" as "Задача: Общий страховой тариф по…",
     source_task."ins_kv" as "Задача: КВ (ins_kv)",
     source_task."d_full_pack" as "Задача: Дата получения полного п…",
     source_task."task_annul_reason" as "Задача: Причина аннулирования за…",
@@ -1140,14 +1188,11 @@ select
     source_task."is_special_accept_to" as "Задача: СпецАкцепт ТО",
     source_task_object."parent_id" as "Связь задачи и объекта: ID родител…",
     source_task_object."characteristics_id" as "Связь задачи и объекта: None",
-    source_task_object."insured_sum" as "Связь задачи и объекта: Страхова…",
-    source_task_object."insured_sum_currency" as "Связь задачи и объекта: Валюта ст…",
     source_task_object."id" as "Связь задачи и объекта: ID объекта…",
     source_task_object."d_create" as "Связь задачи и объекта: Дата созд…",
     source_task_object."d_change" as "Связь задачи и объекта: Дата изме…",
     source_task_object."data" as "Связь задачи и объекта: Кастомны…",
     source_task_object."object_group_id" as "Связь задачи и объекта: Группа об…",
-    source_task_object."per_occurance_limit" as "Связь задачи и объекта: Лимит по…",
     source_contract."d_create" as "Договор: Дата создания записи",
     source_contract."active" as "Договор: Активность",
     source_contract."status" as "Договор: Текущий этап бизнес-про…",
@@ -1263,6 +1308,38 @@ left join base_geo_address source_address
     on source_address.id = object_rows.geo_address_id
 left join bps_contractor source_policyholder
     on source_policyholder.id = object_rows.policyholder_id
+left join lateral (
+    select
+        count(*) as condition_row_count,
+        count(*) filter (
+            where condition.insured_sum is not null
+        ) as rows_with_insured_sum,
+        count(distinct condition.insured_sum) filter (
+            where condition.insured_sum is not null
+        ) as distinct_insured_sum_count,
+        min(condition.insured_sum) as minimum_insured_sum,
+        max(condition.insured_sum) as maximum_insured_sum,
+        string_agg(
+            distinct condition.insured_sum_currency,
+            ', '
+            order by condition.insured_sum_currency
+        ) filter (
+            where condition.insured_sum_currency is not null
+        ) as insured_sum_currencies,
+        min(condition.per_occurance_limit)
+            as minimum_per_occurrence_limit,
+        max(condition.per_occurance_limit)
+            as maximum_per_occurrence_limit,
+        jsonb_agg(
+            to_jsonb(condition)
+            order by
+                condition.terms_option_number nulls last,
+                condition.id
+        ) as all_condition_rows
+    from base_insurance_object_conditions condition
+    where condition.characteristics_id = object_rows.characteristics_id
+) source_conditions
+    on true
 order by
     duplicate.address_group_number,
     object_rows.policyholder_id,
