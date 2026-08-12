@@ -409,6 +409,7 @@ select
     max(area_numeric) as maximum_area,
     count(distinct nullif(btrim(object_description), ''))
         as different_description_count,
+    count(nullif(btrim(fias_code), '')) as rows_with_fias,
     count(distinct nullif(btrim(fias_code), '')) as fias_count
 from objects_prepared_for_egrn
 where address_match_key is not null
@@ -480,6 +481,8 @@ select
         as "Максимальная площадь",
     duplicate.different_description_count
         as "Разных описаний объекта",
+    duplicate.rows_with_fias
+        as "Строк с ФИАС из Сферы",
     duplicate.fias_count
         as "Разных заполненных ФИАС",
     case
@@ -537,6 +540,12 @@ select
     object_rows.characteristics_id as "ID характеристик",
     object_rows.object_id as "ID объекта",
     object_rows.geo_address_id as "ID записи адреса",
+    object_rows.fias_code as "ФИАС объекта из Сферы",
+    case
+        when nullif(btrim(object_rows.fias_code), '') is null
+            then 'нет'
+        else 'да'
+    end as "ФИАС заполнен",
     object_rows.address_source as "Откуда взят адрес",
     object_rows.address_for_egrn_search as "Адрес Сферы для поиска",
     object_rows.source_address as "Адрес-источник до разбора",
@@ -559,7 +568,6 @@ select
     object_rows.block as "Корпус",
     object_rows.flat as "Квартира/помещение",
     object_rows.office as "Офис",
-    object_rows.fias_code as "ФИАС из Сферы",
     object_rows.longitude as "Долгота",
     object_rows.latitude as "Широта",
     object_rows.address_dgis_id as "ID адреса 2ГИС",
