@@ -30,6 +30,8 @@
 - Минимальная и максимальная СС среди объектов договора — диапазон объектных
   сумм из условий внутри выбранной задачи договора. Это НЕ исторический
   минимум и максимум общей суммы договора.
+- Площадь берётся из total_area_sq_m внутри JSON-характеристик объекта.
+  Выводится исходное значение без дополнительного пересчёта.
 */
 
 with task_candidates as (
@@ -99,6 +101,10 @@ object_candidates as (
         obj.elementary_obj_type,
         obj.obj_name as object_name,
         obj.description as object_description,
+        nullif(
+            btrim(ch.characteristics ->> 'total_area_sq_m'),
+            ''
+        ) as object_area,
         obj.original_address,
         obj.geo_address_id,
         geo.full_address,
@@ -161,6 +167,7 @@ selected_objects as (
         elementary_obj_type,
         object_name,
         object_description,
+        object_area,
         original_address,
         geo_address_id,
         full_address,
@@ -216,6 +223,7 @@ select
     obj.object_id as "ID объекта",
     obj.object_name as "Название объекта",
     obj.object_description as "Описание объекта",
+    obj.object_area as "Площадь объекта из характеристик",
     obj.elementary_obj_type as "Тип объекта",
     obj.task_object_insured_sum as "СС объекта из связи с задачей",
     obj.task_object_insured_sum_currency
@@ -266,7 +274,8 @@ order by
    Адрес не является ID объекта и не подходит для автоматического склеивания.
 8. Описание помогает различать объекты по одному адресу, но также не является
    уникальным ключом.
-9. Полный адрес может быть пустым. Тогда остаётся адрес, введённый вручную.
-10. Запрос берёт только последнюю подходящую задачу договора. Это текущий
+9. Площадь хранится внутри JSON и может быть пустой или записанной текстом.
+10. Полный адрес может быть пустым. Тогда остаётся адрес, введённый вручную.
+11. Запрос берёт только последнюю подходящую задачу договора. Это текущий
     объектный срез, а не полная история всех изменений договора.
 */
