@@ -48,19 +48,6 @@ sphere_text as (
     select
         s.*,
         coalesce(
-            nullif(trim(s.postal_code), ''),
-            regexp_substr(
-                s.address_text,
-                '(^|,)[[:space:]]*([0-9]{6})([[:space:]]*,|$)',
-                1, 1, 'i', 2
-            )
-        ) as postal_code_raw,
-        regexp_substr(
-            s.address_text,
-            '(^|,)[[:space:]]*([^,]*(область|обл[.]?|край|республика|респ[.]?)[^,]*)',
-            1, 1, 'i', 2
-        ) as region_raw,
-        coalesce(
             nullif(trim(s.full_address), ''),
             nullif(trim(s.original_address), '')
         ) as source_address,
@@ -93,6 +80,19 @@ sphere_parts_raw as (
     /* Берём готовые части адреса, а при их отсутствии разбираем полный адрес. */
     select
         s.*,
+        coalesce(
+            nullif(trim(s.postal_code), ''),
+            regexp_substr(
+                s.address_text,
+                '(^|,)[[:space:]]*([0-9]{6})([[:space:]]*,|$)',
+                1, 1, 'i', 2
+            )
+        ) as postal_code_raw,
+        regexp_substr(
+            s.address_text,
+            '(^|,)[[:space:]]*([^,]*(область|обл[.]?|край|республика|респ[.]?)[^,]*)',
+            1, 1, 'i', 2
+        ) as region_raw,
         coalesce(
             nullif(trim(s.settlement), ''),
             regexp_substr(
