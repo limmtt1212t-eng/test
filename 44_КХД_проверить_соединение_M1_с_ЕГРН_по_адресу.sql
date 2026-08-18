@@ -8,6 +8,7 @@
 
 Для поиска используются населённый пункт, улица и дом. Корпус, строение,
 квартира, офис, комната или помещение учитываются, если они указаны.
+Индекс и регион сравниваются, если они заполнены с обеих сторон.
 Площадь выводится рядом для проверки, но в соединении пока не участвует.
 
 Если загруженная таблица называется иначе, нужно изменить её название
@@ -46,6 +47,19 @@ sphere_text as (
     /* Если нормализованного адреса нет, используем адрес, введённый вручную. */
     select
         s.*,
+        coalesce(
+            nullif(trim(s.postal_code), ''),
+            regexp_substr(
+                s.address_text,
+                '(^|,)[[:space:]]*([0-9]{6})([[:space:]]*,|$)',
+                1, 1, 'i', 2
+            )
+        ) as postal_code_raw,
+        regexp_substr(
+            s.address_text,
+            '(^|,)[[:space:]]*([^,]*(область|обл[.]?|край|республика|респ[.]?)[^,]*)',
+            1, 1, 'i', 2
+        ) as region_raw,
         coalesce(
             nullif(trim(s.full_address), ''),
             nullif(trim(s.original_address), '')
@@ -189,6 +203,17 @@ sphere_prepared as (
     /* Приводим части адреса к одному виду для сравнения. */
     select /*+ materialize */
         s.*,
+        regexp_replace(s.postal_code_raw, '[^0-9]+', '')
+            as sphere_postal_code,
+        regexp_replace(
+            regexp_replace(
+                replace(lower(trim(s.region_raw)), 'ё', 'е'),
+                '(^|[[:space:]])(область|обл|край|республика|респ)([.]|[[:space:]]|$)',
+                ' '
+            ),
+            '[^[:alnum:]]+',
+            ''
+        ) as sphere_region,
         regexp_replace(
             regexp_replace(
                 replace(lower(trim(s.locality_raw)), 'ё', 'е'),
@@ -263,6 +288,17 @@ egrn_normalized as (
         e.fias_id_flat,
         e.row_update_date,
         e.ias_update_date,
+        regexp_replace(trim(e.postal_code), '[^0-9]+', '')
+            as egrn_postal_code,
+        regexp_replace(
+            regexp_replace(
+                replace(lower(trim(e.region)), 'ё', 'е'),
+                '(^|[[:space:]])(область|обл|край|республика|респ)([.]|[[:space:]]|$)',
+                ' '
+            ),
+            '[^[:alnum:]]+',
+            ''
+        ) as egrn_region,
         regexp_replace(
             regexp_replace(
                 replace(lower(trim(e.city)), 'ё', 'е'),
@@ -348,9 +384,19 @@ address_matches as (
         e.*
     from sphere_prepared s
     join egrn_candidates e
-        on s.sphere_street = e.egrn_street
+       on s.sphere_street = e.egrn_street
        and s.sphere_house in (e.egrn_house, e.egrn_vladenie)
        and s.sphere_locality in (e.egrn_city, e.egrn_settlement)
+       and (
+           s.sphere_region is null
+           or e.egrn_region is null
+           or s.sphere_region = e.egrn_region
+       )
+       and (
+           s.sphere_postal_code is null
+           or e.egrn_postal_code is null
+           or s.sphere_postal_code = e.egrn_postal_code
+       )
        and (
            s.sphere_korpus is null
            or s.sphere_korpus = e.egrn_korpus
@@ -452,11 +498,33 @@ select
     sphere.real_estate_objects_in_contract
         as "Объектов недвижимости в договоре",
 
-    /* Данные объекта Сферы, по которым удобно проверить найденную связь. */
+    /* Объект и исходные адресные строки. */
     sphere.object_description as "Описание объекта Сферы",
     sphere.full_address as "Полный адрес Сферы",
     sphere.original_address as "Исходный адрес Сферы",
+    prepared.source_address as "Адрес, который разбирал запрос",
     sphere.total_area as "Площадь Сферы",
+
+    /* Части адреса, которые уже лежали в отдельных колонках Сферы. */
+    sphere.postal_code as "Сфера: почтовый индекс",
+    sphere.settlement as "Сфера: населённый пункт",
+    sphere.street as "Сфера: улица",
+    sphere.house as "Сфера: дом",
+    sphere.block as "Сфера: корпус",
+    sphere.building as "Сфера: строение",
+    sphere.flat as "Сфера: квартира или помещение",
+    sphere.office as "Сфера: офис",
+
+    /* Так запрос разбил исходную строку адреса до очистки. */
+    prepared.postal_code_raw as "После разбора: почтовый индекс",
+    prepared.region_raw as "После разбора: регион",
+    prepared.locality_raw as "После разбора: населённый пункт",
+    prepared.street_raw as "После разбора: улица",
+    prepared.house_raw as "После разбора: дом",
+    prepared.korpus_raw as "После разбора: корпус",
+    prepared.stroenie_raw as "После разбора: строение",
+    prepared.unit_type_raw as "После разбора: вид помещения",
+    prepared.unit_raw as "После разбора: номер помещения",
 
     /* Итог поиска. */
     case
@@ -474,14 +542,16 @@ select
     end as "Результат поиска",
     nvl(summary.candidate_count, 0) as "Кандидатов ЕГРН",
 
-    /* Нормализованные части показывают, что именно сравнивал запрос. */
-    prepared.sphere_locality as "Населённый пункт для поиска",
-    prepared.sphere_street as "Улица для поиска",
-    prepared.sphere_house as "Дом для поиска",
-    prepared.sphere_korpus as "Корпус для поиска",
-    prepared.sphere_stroenie as "Строение для поиска",
-    prepared.sphere_unit_type as "Вид помещения для поиска",
-    prepared.sphere_unit as "Номер помещения для поиска",
+    /* Эти очищенные значения непосредственно сравниваются с ЕГРН. */
+    prepared.sphere_postal_code as "Ключ поиска: почтовый индекс",
+    prepared.sphere_region as "Ключ поиска: регион",
+    prepared.sphere_locality as "Ключ поиска: населённый пункт",
+    prepared.sphere_street as "Ключ поиска: улица",
+    prepared.sphere_house as "Ключ поиска: дом",
+    prepared.sphere_korpus as "Ключ поиска: корпус",
+    prepared.sphere_stroenie as "Ключ поиска: строение",
+    prepared.sphere_unit_type as "Ключ поиска: вид помещения",
+    prepared.sphere_unit as "Ключ поиска: номер помещения",
 
     /* Поля ЕГРН заполняются только для однозначной связи. */
     chosen.cad_ind as "Внутренний ID ЕГРН",
