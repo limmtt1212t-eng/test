@@ -459,14 +459,37 @@ select
     end as "Результат поиска",
     nvl(summary.candidate_count, 0) as "Кандидатов зданий ЕГРН",
 
-    /* Эти очищенные значения непосредственно сравниваются с ЕГРН. */
-    prepared.sphere_postal_code as "Ключ поиска: почтовый индекс",
-    prepared.sphere_region as "Ключ поиска: регион",
-    prepared.sphere_locality as "Ключ поиска: населённый пункт",
-    prepared.sphere_street as "Ключ поиска: улица",
-    prepared.sphere_house as "Ключ поиска: дом",
-    prepared.sphere_korpus as "Ключ поиска: корпус",
-    prepared.sphere_stroenie as "Ключ поиска: строение",
+    /* Очищенные значения показаны парами: Сфера и найденное здание КХД. */
+    prepared.sphere_postal_code as "Сравнение: индекс Сферы",
+    chosen.egrn_postal_code as "Сравнение: индекс КХД",
+
+    prepared.sphere_region as "Сравнение: регион Сферы",
+    chosen.egrn_region as "Сравнение: регион КХД",
+
+    prepared.sphere_locality as "Сравнение: населённый пункт Сферы",
+    case
+        when prepared.sphere_locality = chosen.egrn_city
+            then chosen.egrn_city
+        when prepared.sphere_locality = chosen.egrn_settlement
+            then chosen.egrn_settlement
+    end as "Сравнение: населённый пункт КХД",
+
+    prepared.sphere_street as "Сравнение: улица Сферы",
+    chosen.egrn_street as "Сравнение: улица КХД",
+
+    prepared.sphere_house as "Сравнение: дом Сферы",
+    case
+        when prepared.sphere_house = chosen.egrn_house
+            then chosen.egrn_house
+        when prepared.sphere_house = chosen.egrn_vladenie
+            then chosen.egrn_vladenie
+    end as "Сравнение: дом КХД",
+
+    prepared.sphere_korpus as "Сравнение: корпус Сферы",
+    chosen.egrn_korpus as "Сравнение: корпус КХД",
+
+    prepared.sphere_stroenie as "Сравнение: строение Сферы",
+    chosen.egrn_stroenie as "Сравнение: строение КХД",
 
     /* Поля одного найденного здания. */
     chosen.cad_ind as "Внутренний ID здания ЕГРН",
