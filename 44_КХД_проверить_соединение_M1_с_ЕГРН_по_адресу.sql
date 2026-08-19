@@ -141,16 +141,16 @@ sphere_parts_raw as (
             nullif(trim(s.block), ''),
             regexp_substr(
                 s.address_text,
-                '(^|,)[[:space:]]*(корпус|корп|к)[.]?[[:space:]]*([0-9а-яa-z/-]+)',
-                1, 1, 'i', 3
+                '(^|,)[[:space:]]*(корпус|корп|к)([.]|[[:space:]])+[[:space:]]*([0-9а-яa-z/-]+)',
+                1, 1, 'i', 4
             )
         ) as korpus_raw,
         coalesce(
             nullif(trim(s.building), ''),
             regexp_substr(
                 s.address_text,
-                '(^|,)[[:space:]]*(строение|стр)[.]?[[:space:]]*([0-9а-яa-z/-]+)',
-                1, 1, 'i', 3
+                '(^|,)[[:space:]]*(строение|стр)([.]|[[:space:]])+[[:space:]]*([0-9а-яa-z/-]+)',
+                1, 1, 'i', 4
             )
         ) as stroenie_raw
     from sphere_text s
