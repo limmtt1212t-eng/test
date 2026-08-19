@@ -9,7 +9,9 @@
 Для поиска используются населённый пункт, улица и дом. Корпус и строение
 учитываются, если они указаны.
 Индекс и регион сравниваются, если они заполнены с обеих сторон.
-Площадь выводится рядом для проверки, но в соединении пока не участвует.
+Если по адресу найдено несколько зданий, площадь используется как
+дополнительная проверка. Если площади нет или она не помогла, кандидаты
+по адресу не отсекаются.
 
 В поиск попадают только типы ЕГРН «здание», «сооружение» и «строение»
 с уровнем адреса FIAS_HOUSE. Квартиры, офисы, комнаты и помещения исключены.
@@ -52,6 +54,11 @@ sphere_text as (
     /* Если нормализованного адреса нет, используем адрес, введённый вручную. */
     select
         s.*,
+        replace(
+            regexp_replace(trim(s.total_area), '[[:space:]]+', ''),
+            ',',
+            '.'
+        ) as sphere_area_text,
         coalesce(
             nullif(trim(s.full_address), ''),
             nullif(trim(s.original_address), '')
@@ -165,6 +172,17 @@ sphere_prepared as (
     /* Приводим части адреса к одному виду для сравнения. */
     select /*+ materialize */
         s.*,
+        case
+            when regexp_like(
+                s.sphere_area_text,
+                '^[0-9]+([.][0-9]+)?$'
+            )
+            then to_number(
+                s.sphere_area_text,
+                '999999999999999999999999D9999999999',
+                'NLS_NUMERIC_CHARACTERS=''.,'''
+            )
+        end as sphere_area,
         regexp_replace(s.postal_code_raw, '[^0-9]+', '')
             as sphere_postal_code,
         regexp_replace(
@@ -337,6 +355,7 @@ address_matches as (
     /* Сравниваем адрес только до уровня здания. */
     select
         s.sphere_row_id,
+        s.sphere_area,
         e.*
     from sphere_prepared s
     join egrn_candidates e
@@ -386,19 +405,56 @@ one_row_per_egrn_object as (
     where r.egrn_row_number = 1
 ),
 
+area_check as (
+    /* Площадь проверяем только там, где она есть с обеих сторон. */
+    select
+        c.*,
+        count(*) over (
+            partition by c.sphere_row_id
+        ) as address_candidate_count,
+        case
+            when c.sphere_area > 0
+             and c.square is not null
+             and abs(c.square - c.sphere_area)
+                 <= greatest(1, c.sphere_area * 0.01)
+                then 1
+            else 0
+        end as area_matches
+    from one_row_per_egrn_object c
+),
+
+area_choice as (
+    select
+        a.*,
+        max(a.area_matches) over (
+            partition by a.sphere_row_id
+        ) as has_area_match
+    from area_check a
+),
+
+candidates_after_area as (
+    /* Если площадь помогла, оставляем совпавших. Иначе никого не отсекаем. */
+    select a.*
+    from area_choice a
+    where a.has_area_match = 0
+       or a.area_matches = 1
+),
+
 candidate_counts as (
     select
         c.*,
         count(*) over (
             partition by c.sphere_row_id
         ) as candidate_count
-    from one_row_per_egrn_object c
+    from candidates_after_area c
 ),
 
 candidate_summary as (
     select
         c.sphere_row_id,
-        max(c.candidate_count) as candidate_count
+        max(c.candidate_count) as candidate_count,
+        max(c.address_candidate_count) as address_candidate_count,
+        max(c.has_area_match) as has_area_match
     from candidate_counts c
     group by c.sphere_row_id
 ),
@@ -462,7 +518,15 @@ select
             then 'Найдено одно здание ЕГРН'
         else 'Найдено несколько зданий. ЕГРН не присоединён'
     end as "Результат поиска",
-    nvl(summary.candidate_count, 0) as "Кандидатов зданий ЕГРН",
+    nvl(summary.address_candidate_count, 0)
+        as "Кандидатов по адресу",
+    nvl(summary.candidate_count, 0)
+        as "Кандидатов после площади",
+    case
+        when summary.address_candidate_count > summary.candidate_count
+            then 'Да'
+        else 'Нет'
+    end as "Площадь помогла сузить поиск",
 
     /* Очищенные значения показаны парами: Сфера и найденное здание КХД. */
     prepared.sphere_postal_code as "Сравнение: индекс Сферы",

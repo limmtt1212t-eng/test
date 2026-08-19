@@ -40,6 +40,11 @@ sphere_text as (
     /* Если нормализованного адреса нет, используем адрес, введённый вручную. */
     select
         s.*,
+        replace(
+            regexp_replace(trim(s.total_area), '[[:space:]]+', ''),
+            ',',
+            '.'
+        ) as sphere_area_text,
         coalesce(
             nullif(trim(s.full_address), ''),
             nullif(trim(s.original_address), '')
@@ -153,6 +158,17 @@ sphere_prepared as (
     /* Приводим части адреса к одному виду для сравнения. */
     select /*+ materialize */
         s.*,
+        case
+            when regexp_like(
+                s.sphere_area_text,
+                '^[0-9]+([.][0-9]+)?$'
+            )
+            then to_number(
+                s.sphere_area_text,
+                '999999999999999999999999D9999999999',
+                'NLS_NUMERIC_CHARACTERS=''.,'''
+            )
+        end as sphere_area,
         regexp_replace(s.postal_code_raw, '[^0-9]+', '')
             as sphere_postal_code,
         regexp_replace(
@@ -325,6 +341,7 @@ address_matches as (
     /* Сравниваем адрес только до уровня здания. */
     select
         s.sphere_row_id,
+        s.sphere_area,
         e.*
     from sphere_prepared s
     join egrn_candidates e
@@ -374,13 +391,48 @@ one_row_per_egrn_object as (
     where r.egrn_row_number = 1
 ),
 
+area_check as (
+    /* Площадь проверяем только там, где она есть с обеих сторон. */
+    select
+        c.*,
+        count(*) over (
+            partition by c.sphere_row_id
+        ) as address_candidate_count,
+        case
+            when c.sphere_area > 0
+             and c.square is not null
+             and abs(c.square - c.sphere_area)
+                 <= greatest(1, c.sphere_area * 0.01)
+                then 1
+            else 0
+        end as area_matches
+    from one_row_per_egrn_object c
+),
+
+area_choice as (
+    select
+        a.*,
+        max(a.area_matches) over (
+            partition by a.sphere_row_id
+        ) as has_area_match
+    from area_check a
+),
+
+candidates_after_area as (
+    /* Если площадь помогла, оставляем совпавших. Иначе никого не отсекаем. */
+    select a.*
+    from area_choice a
+    where a.has_area_match = 0
+       or a.area_matches = 1
+),
+
 candidate_counts as (
     select
         c.*,
         count(*) over (
             partition by c.sphere_row_id
         ) as candidate_count
-    from one_row_per_egrn_object c
+    from candidates_after_area c
 
 )
 select
@@ -400,7 +452,18 @@ select
     sphere.office as "Офис Сферы",
 
     /* Сколько зданий ЕГРН подошло и какой кандидат показан в этой строке. */
-    candidate.candidate_count as "Всего кандидатов ЕГРН",
+    candidate.address_candidate_count as "Кандидатов по адресу",
+    candidate.candidate_count as "Кандидатов после площади",
+    case
+        when candidate.address_candidate_count > candidate.candidate_count
+            then 'Да'
+        else 'Нет'
+    end as "Площадь помогла сузить поиск",
+    case
+        when candidate.sphere_area is not null
+         and candidate.square is not null
+            then abs(candidate.square - candidate.sphere_area)
+    end as "Разница площади, м2",
     row_number() over (
         partition by sphere.sphere_row_id
         order by candidate.cadaster, candidate.cad_ind
@@ -459,7 +522,7 @@ join sphere_prepared prepared
     on prepared.sphere_row_id = sphere.sphere_row_id
 join candidate_counts candidate
     on candidate.sphere_row_id = sphere.sphere_row_id
-where candidate.candidate_count >= 2
+where candidate.address_candidate_count >= 2
 order by
     sphere.contract_number,
     sphere.object_id,
