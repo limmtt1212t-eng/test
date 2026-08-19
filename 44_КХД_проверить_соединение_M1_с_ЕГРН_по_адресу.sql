@@ -154,8 +154,8 @@ sphere_parts_raw as (
             nullif(trim(s.building), ''),
             regexp_substr(
                 s.address_text,
-                '(^|,)[[:space:]]*(строение|стр)([.]|[[:space:]])+[[:space:]]*([0-9а-яa-z/-]+)',
-                1, 1, 'i', 4
+                '(^|,|[[:space:]])(строение|стр)[.]?[[:space:]]*([0-9а-яa-z/-]+)',
+                1, 1, 'i', 3
             )
         ) as stroenie_raw
     from sphere_text s
