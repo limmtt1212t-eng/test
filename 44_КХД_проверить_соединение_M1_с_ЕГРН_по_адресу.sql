@@ -4,12 +4,17 @@
 Запускать в Oracle.
 
 Результат содержит одну строку на объект Сферы. Данные ЕГРН заполняются
-только тогда, когда по адресу найден один кадастровый объект.
+только тогда, когда по адресу найдена одна запись уровня здания.
 
-Для поиска используются населённый пункт, улица и дом. Корпус, строение,
-квартира, офис, комната или помещение учитываются, если они указаны.
+Для поиска используются населённый пункт, улица и дом. Корпус и строение
+учитываются, если они указаны.
 Индекс и регион сравниваются, если они заполнены с обеих сторон.
 Площадь выводится рядом для проверки, но в соединении пока не участвует.
+
+В поиск попадают только типы ЕГРН «здание», «сооружение» и «строение»
+с уровнем адреса FIAS_HOUSE. Квартиры, офисы, комнаты и помещения исключены.
+Если по одному адресу Сферы записано несколько страховых объектов,
+одно найденное здание ЕГРН присоединяется к каждому из них.
 
 Если загруженная таблица называется иначе, нужно изменить её название
 только в CTE sphere_source.
@@ -147,55 +152,7 @@ sphere_parts_raw as (
                 '(^|,)[[:space:]]*(строение|стр)[.]?[[:space:]]*([0-9а-яa-z/-]+)',
                 1, 1, 'i', 3
             )
-        ) as stroenie_raw,
-        case
-            when regexp_like(
-                s.address_text,
-                '(^|,)[[:space:]]*(квартира|кв)[.]?[[:space:]]+',
-                'i'
-            ) then 'Квартира'
-            when regexp_like(
-                s.address_text,
-                '(^|,)[[:space:]]*(офис|оф)[.]?[[:space:]]+',
-                'i'
-            ) then 'Офис'
-            when regexp_like(
-                s.address_text,
-                '(^|,)[[:space:]]*(комната|комн)[.]?[[:space:]]+',
-                'i'
-            ) then 'Комната'
-            when regexp_like(
-                s.address_text,
-                '(^|,)[[:space:]]*(помещение|пом)[.]?[[:space:]]+',
-                'i'
-            ) then 'Помещение'
-            when nullif(trim(s.office), '') is not null then 'Офис'
-            when nullif(trim(s.flat), '') is not null then 'Квартира'
-        end as unit_type_raw,
-        coalesce(
-            regexp_substr(
-                s.address_text,
-                '(^|,)[[:space:]]*(квартира|кв)[.]?[[:space:]]*([^,]+)',
-                1, 1, 'i', 3
-            ),
-            regexp_substr(
-                s.address_text,
-                '(^|,)[[:space:]]*(офис|оф)[.]?[[:space:]]*([^,]+)',
-                1, 1, 'i', 3
-            ),
-            regexp_substr(
-                s.address_text,
-                '(^|,)[[:space:]]*(комната|комн)[.]?[[:space:]]*([^,]+)',
-                1, 1, 'i', 3
-            ),
-            regexp_substr(
-                s.address_text,
-                '(^|,)[[:space:]]*(помещение|пом)[.]?[[:space:]]*([^,]+)',
-                1, 1, 'i', 3
-            ),
-            nullif(trim(s.office), ''),
-            nullif(trim(s.flat), '')
-        ) as unit_raw
+        ) as stroenie_raw
     from sphere_text s
 ),
 
@@ -246,13 +203,7 @@ sphere_prepared as (
             replace(lower(trim(s.stroenie_raw)), 'ё', 'е'),
             '[^[:alnum:]]+',
             ''
-        ) as sphere_stroenie,
-        s.unit_type_raw as sphere_unit_type,
-        regexp_replace(
-            replace(lower(trim(s.unit_raw)), 'ё', 'е'),
-            '[^[:alnum:]]+',
-            ''
-        ) as sphere_unit
+        ) as sphere_stroenie
     from sphere_parts_raw s
 ),
 
@@ -284,8 +235,8 @@ egrn_normalized as (
         e.oks_type,
         e.oks_purpose,
         e.object_status,
+        e.fias_level,
         e.fias_id_house,
-        e.fias_id_flat,
         e.row_update_date,
         e.ias_update_date,
         regexp_replace(trim(e.postal_code), '[^0-9]+', '')
@@ -345,26 +296,26 @@ egrn_normalized as (
             replace(lower(trim(e.stroenie)), 'ё', 'е'),
             '[^[:alnum:]]+',
             ''
-        ) as egrn_stroenie,
-        regexp_replace(replace(lower(trim(e.flat)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_flat,
-        regexp_replace(replace(lower(trim(e.flat2)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_flat2,
-        regexp_replace(replace(lower(trim(e.office)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_office,
-        regexp_replace(replace(lower(trim(e.office2)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_office2,
-        regexp_replace(replace(lower(trim(e.room)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_room,
-        regexp_replace(replace(lower(trim(e.room2)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_room2,
-        regexp_replace(replace(lower(trim(e.compartment1)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_compartment1,
-        regexp_replace(replace(lower(trim(e.compartment2)), 'ё', 'е'), '[^[:alnum:]]+', '')
-            as egrn_compartment2
+        ) as egrn_stroenie
     from DM_RISK_AVATAR.EGRN_DATA e
-    where e.cadaster is not null
-       or e.cad_ind is not null
+    where upper(trim(e.fias_level)) = 'FIAS_HOUSE'
+      and lower(trim(e.oks_type)) in (
+          'здание',
+          'сооружение',
+          'строение'
+      )
+      and e.flat is null
+      and e.flat2 is null
+      and e.office is null
+      and e.office2 is null
+      and e.room is null
+      and e.room2 is null
+      and e.compartment1 is null
+      and e.compartment2 is null
+      and (
+          e.cadaster is not null
+          or e.cad_ind is not null
+      )
 ),
 
 egrn_candidates as (
@@ -378,7 +329,7 @@ egrn_candidates as (
 ),
 
 address_matches as (
-    /* Корпус, строение и помещение проверяются, если указаны в Сфере. */
+    /* Сравниваем адрес только до уровня здания. */
     select
         s.sphere_row_id,
         e.*
@@ -404,38 +355,6 @@ address_matches as (
        and (
            s.sphere_stroenie is null
            or s.sphere_stroenie = e.egrn_stroenie
-       )
-       and (
-           (
-               s.sphere_unit is null
-               and e.egrn_flat is null
-               and e.egrn_flat2 is null
-               and e.egrn_office is null
-               and e.egrn_office2 is null
-               and e.egrn_room is null
-               and e.egrn_room2 is null
-               and e.egrn_compartment1 is null
-               and e.egrn_compartment2 is null
-           )
-           or (
-               s.sphere_unit_type = 'Квартира'
-               and s.sphere_unit in (e.egrn_flat, e.egrn_flat2)
-           )
-           or (
-               s.sphere_unit_type = 'Офис'
-               and s.sphere_unit in (e.egrn_office, e.egrn_office2)
-           )
-           or (
-               s.sphere_unit_type = 'Комната'
-               and s.sphere_unit in (e.egrn_room, e.egrn_room2)
-           )
-           or (
-               s.sphere_unit_type = 'Помещение'
-               and s.sphere_unit in (
-                   e.egrn_compartment1,
-                   e.egrn_compartment2
-               )
-           )
        )
     where s.sphere_locality is not null
       and s.sphere_street is not null
@@ -480,7 +399,7 @@ candidate_summary as (
 ),
 
 chosen_egrn as (
-    /* ЕГРН присоединяется только при одном кандидате. */
+    /* Здание ЕГРН присоединяется только при одном кандидате. */
     select c.*
     from candidate_counts c
     where c.candidate_count = 1
@@ -523,8 +442,6 @@ select
     prepared.house_raw as "После разбора: дом",
     prepared.korpus_raw as "После разбора: корпус",
     prepared.stroenie_raw as "После разбора: строение",
-    prepared.unit_type_raw as "После разбора: вид помещения",
-    prepared.unit_raw as "После разбора: номер помещения",
 
     /* Итог поиска. */
     case
@@ -535,12 +452,12 @@ select
           or prepared.sphere_house is null
             then 'Не удалось выделить населённый пункт, улицу или дом'
         when nvl(summary.candidate_count, 0) = 0
-            then 'В ЕГРН ничего не найдено'
+            then 'Здание ЕГРН не найдено'
         when summary.candidate_count = 1
-            then 'Найден один объект ЕГРН'
-        else 'Найдено несколько объектов. ЕГРН не присоединён'
+            then 'Найдено одно здание ЕГРН'
+        else 'Найдено несколько зданий. ЕГРН не присоединён'
     end as "Результат поиска",
-    nvl(summary.candidate_count, 0) as "Кандидатов ЕГРН",
+    nvl(summary.candidate_count, 0) as "Кандидатов зданий ЕГРН",
 
     /* Эти очищенные значения непосредственно сравниваются с ЕГРН. */
     prepared.sphere_postal_code as "Ключ поиска: почтовый индекс",
@@ -550,21 +467,22 @@ select
     prepared.sphere_house as "Ключ поиска: дом",
     prepared.sphere_korpus as "Ключ поиска: корпус",
     prepared.sphere_stroenie as "Ключ поиска: строение",
-    prepared.sphere_unit_type as "Ключ поиска: вид помещения",
-    prepared.sphere_unit as "Ключ поиска: номер помещения",
 
-    /* Поля ЕГРН заполняются только для однозначной связи. */
-    chosen.cad_ind as "Внутренний ID ЕГРН",
-    chosen.cadaster as "Кадастровый номер",
-    chosen.egrn_address as "Адрес ЕГРН",
-    chosen.square as "Площадь ЕГРН",
-    chosen.measure as "Единица площади ЕГРН",
-    chosen.building_type as "Тип строения ЕГРН",
-    chosen.oks_type as "Тип объекта ЕГРН",
-    chosen.oks_purpose as "Назначение объекта ЕГРН",
-    chosen.object_status as "Статус объекта ЕГРН",
+    /* Поля одного найденного здания. */
+    chosen.cad_ind as "Внутренний ID здания ЕГРН",
+    chosen.cadaster as "Кадастровый номер здания",
+    chosen.egrn_address as "Адрес здания ЕГРН",
+    chosen.square as "Площадь здания ЕГРН",
+    chosen.measure as "Единица площади здания",
+    chosen.building_type as "Тип строения здания ЕГРН",
+    chosen.oks_type as "Тип здания ЕГРН",
+    chosen.oks_purpose as "Назначение здания ЕГРН",
+    chosen.object_status as "Статус здания ЕГРН",
+    chosen.fias_level as "Уровень адреса ЕГРН",
     chosen.fias_id_house as "ФИАС дома ЕГРН",
-    chosen.fias_id_flat as "ФИАС помещения ЕГРН"
+    case
+        when chosen.cad_ind is not null then 'Здание'
+    end as "Уровень присоединения"
 
 from sphere_source sphere
 join sphere_prepared prepared
@@ -580,15 +498,14 @@ order by
 /*
 Как читать результат
 --------------------
-Найден один объект ЕГРН
-    Связь однозначная. Поля ЕГРН заполнены.
+Найдено одно здание ЕГРН
+    Здание присоединено ко всем объектам Сферы с этим адресом.
 
-Найдено несколько объектов
-    По адресу есть несколько кадастровых объектов. Ничего не присоединено.
-    Следующим шагом такие строки можно проверять с помощью площади.
+Найдено несколько зданий
+    По адресу есть несколько кадастровых зданий. Ничего не присоединено.
 
-В ЕГРН ничего не найдено
-    Адрес удалось разобрать, но подходящего адреса в ЕГРН не найдено.
+Здание ЕГРН не найдено
+    Адрес удалось разобрать, но запись уровня FIAS_HOUSE не найдена.
 
 Не удалось выделить населённый пункт, улицу или дом
     Адрес есть, но его недостаточно для безопасного автоматического поиска.
