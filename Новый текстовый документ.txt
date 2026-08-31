@@ -1,0 +1,16 @@
+---------------------------------------------------------------------------
+RuntimeError                              Traceback (most recent call last)
+Cell In[13], line 71
+     68 display(cdi_metadata_df)
+     70 if cdi_metadata_df.empty:
+---> 71     raise RuntimeError(
+     72         f'Функция {cdi_schema}.{cdi_function} не видна. '
+     73         f'Подключение: user={oracle_user}, '
+     74         f'database={oracle_database}, service={oracle_service}. '
+     75         'Нужно проверить сервис Oracle, имя функции '
+     76         'и право EXECUTE.'
+     77     )
+     79 function_references = []
+     80 for row in cdi_metadata_df.itertuples(index=False):
+
+RuntimeError: Функция DM_MPTPR.F_GET_CDI_ADDR_BY_TEXT не видна. Подключение: user=SVETOVAVS, database=ODSPROD, service=ODSPROD. Нужно проверить сервис Oracle, имя функции и право EXECUTE.
